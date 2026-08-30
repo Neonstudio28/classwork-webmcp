@@ -1,7 +1,9 @@
 import {
   DEFAULT_CONSTRAINTS,
+  DEMO_SOURCE_TEXT,
   EMPTY_WORKSHEET,
   QUESTION_TYPE_LABELS,
+  analyzeSourceMaterial,
   createDraftWorksheet,
   evaluateConstraints,
   assertQuestionContent,
@@ -119,6 +121,7 @@ export const workspaceActions = {
     topic: string,
     name = 'Classroom source',
     actor: ActivityActor = 'teacher',
+    extractedText?: string,
   ) {
     if (grade !== 4) {
       throw new Error('Classwork is scoped to Grade 4 mathematics for this demo.')
@@ -128,6 +131,7 @@ export const workspaceActions = {
     const nextSource: SourceMaterial = {
       kind: sourceKind(cleaned),
       content: cleaned,
+      extractedText: extractedText?.trim() || undefined,
       name: name.slice(0, 120),
       grade: 4,
       topic: topic.trim().slice(0, 100) || 'Fractions & decimals',
@@ -153,6 +157,7 @@ export const workspaceActions = {
       'Fractions & decimals',
       'Fractions & decimals worksheet',
       'teacher',
+      DEMO_SOURCE_TEXT,
     )
   },
 
@@ -189,7 +194,8 @@ export const workspaceActions = {
         ? [...constraints.standards]
         : state.constraints.standards,
     }
-    const worksheet = createDraftWorksheet(state.source.topic)
+    const sourceAnalysis = analyzeSourceMaterial(state.source)
+    const worksheet = createDraftWorksheet(state.source.topic, state.source)
     try {
       worksheet.questions.forEach((question) => assertQuestionContent(question))
     } catch (error) {
@@ -204,10 +210,14 @@ export const workspaceActions = {
       hasDraft: true,
       lastError: '',
       lastAgentMessage:
-        'Drafted six questions from the source. Time and question balance still need attention.',
+        `Drafted six questions using ${sourceAnalysis.mode === 'topic-fallback' ? 'the selected topic' : 'the staged source evidence'}. Time and question balance still need attention.`,
       activity: withActivity(
         current,
-        activity(actor, 'Generated draft', '6 questions · 2 checks need attention'),
+        activity(
+          actor,
+          'Generated source-grounded draft',
+          `${sourceAnalysis.focus.join(', ')} · 2 checks need attention`,
+        ),
       ),
     }))
     return worksheet

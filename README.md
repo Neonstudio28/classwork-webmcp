@@ -29,7 +29,7 @@ Closing line for the demo video:
 
 A normal chat window can suggest worksheet text, but it cannot reliably maintain a structured, page-scoped model of question IDs, response types, ordering, standards tags, and teacher edits. Classwork’s four `check_*` tools need live structured access to the worksheet that is actually visible—not a stale copy pasted into chat.
 
-WebMCP gives the agent imperative tools bound to the current document. A teacher can rewrite, reorder, or remove a question directly while an agent can edit or swap a question through a registered tool; both paths mutate the same localStorage-backed store and rerun the same constraint functions. The agent therefore reasons about the teacher’s current worksheet instead of reconstructing it from conversation history.
+WebMCP gives the agent imperative tools bound to the current document. A teacher can rewrite, reorder, or remove a question directly while an agent can edit or swap a question through a registered tool; both paths mutate the same localStorage-backed store and rerun the same constraint functions. The read-only `read_workspace_state` tool exposes stable question IDs, the staged source, constraints, and check results, so the agent reasons about the teacher’s current worksheet instead of guessing from the DOM or reconstructing it from conversation history.
 
 ### Browser support for the agent path
 
@@ -37,7 +37,7 @@ Using Classwork's agent-editing and `check_*` tool-calling path currently requir
 
 ## Registered WebMCP tools
 
-All tools are registered client-side with `document.modelContext.registerTool()` and cleaned up with an `AbortSignal`.
+Classwork registers the eight challenge-required tools plus one read-only state tool client-side with `document.modelContext.registerTool()` and cleans them up with an `AbortSignal`.
 
 | Tool | Mode | Visible effect |
 | --- | --- | --- |
@@ -45,12 +45,13 @@ All tools are registered client-side with `document.modelContext.registerTool()`
 | `generate_draft(constraints)` | Complete | Generates the six-question first draft |
 | `edit_question(id, changes)` | Mutate | Rewrites or retags one visible question |
 | `swap_question(id, reason)` | Mutate | Replaces one question in place |
+| `read_workspace_state()` | Read | Returns source metadata, constraints, stable question IDs/content, and all four live checks |
 | `check_time_estimate(worksheet)` | Read | Returns heuristic completion minutes |
 | `check_reading_level(worksheet)` | Read | Returns a sentence/vocabulary grade estimate |
 | `check_question_mix(worksheet)` | Read | Tallies response types against 40/40/20 |
 | `check_standard_coverage(worksheet, standards)` | Read | Returns hit and missing standard IDs |
 
-The read tools accept either the literal string `"current"` or a structured worksheet object. Mutating tools return only after the shared store and visible UI have updated.
+The four `check_*` tools accept either the literal string `"current"` or a structured worksheet object. Mutating tools return only after the shared store and visible UI have updated. `add_source_material` also accepts optional `extracted_text` when an agent can transcribe an image; pasted text and the included demo image are source-grounded, while arbitrary images without a transcript use an explicitly labelled topic-only fallback rather than pretending local OCR occurred.
 
 ## Demo scope
 
@@ -118,7 +119,7 @@ src/
 ├── App.css             tokens and three-tier glass material system
 ├── worksheet.ts        domain types, draft content, four pure checks
 ├── workspaceStore.ts   immutable external store + localStorage + activity log
-└── webmcp.ts           schemas, handlers, and all eight tool registrations
+└── webmcp.ts           schemas, handlers, eight required tools + workspace read
 ```
 
 There is no backend and no hidden worksheet copy. `workspaceStore.ts` is the single source of truth for the page, direct edits, and WebMCP actions.

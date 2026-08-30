@@ -4,6 +4,8 @@ import {
   checkStandardCoverage,
   checkTimeEstimate,
   evaluateConstraints,
+  analyzeSourceMaterial,
+  sourceGroundingLabel,
   type Question,
   type Worksheet,
   type WorksheetConstraints,
@@ -43,7 +45,7 @@ declare global {
 
 type ToolStatus =
   | { state: 'checking'; count: 0; message: string }
-  | { state: 'ready'; count: 8; message: string }
+  | { state: 'ready'; count: number; message: string }
   | { state: 'unsupported'; count: 0; message: string }
   | { state: 'error'; count: number; message: string }
 
@@ -137,16 +139,49 @@ export const toolHandlers = {
     const imageOrText = asNonEmptyString(record.image_or_text, 'image_or_text')
     const grade = Number(record.grade)
     const topic = asNonEmptyString(record.topic, 'topic')
+    const extractedText = record.extracted_text === undefined
+      ? undefined
+      : asNonEmptyString(record.extracted_text, 'extracted_text')
     const source = workspaceActions.addSourceMaterial(
       imageOrText,
       grade,
       topic,
       'Added by classroom agent',
       'agent',
+      extractedText,
     )
     return {
       source: { kind: source.kind, grade: source.grade, topic: source.topic },
       visibleState: conciseState(),
+    }
+  },
+
+  readWorkspaceState() {
+    const current = workspaceStore.getSnapshot()
+    const checks = currentConstraintSnapshot()
+    const sourceAnalysis = current.source
+      ? analyzeSourceMaterial(current.source)
+      : null
+    return {
+      source: current.source
+        ? {
+            kind: current.source.kind,
+            name: current.source.name,
+            grade: current.source.grade,
+            topic: current.source.topic,
+            grounding: sourceAnalysis
+              ? sourceGroundingLabel(sourceAnalysis)
+              : null,
+            sourceText:
+              current.source.kind === 'text'
+                ? current.source.content
+                : current.source.extractedText ?? null,
+          }
+        : null,
+      constraints: current.constraints,
+      worksheet: current.worksheet,
+      checks,
+      hasDraft: current.hasDraft,
     }
   },
 
@@ -252,6 +287,11 @@ const tools: WebMcpTool[] = [
         },
         grade: { type: 'integer', const: 4 },
         topic: { type: 'string' },
+        extracted_text: {
+          type: 'string',
+          description:
+            'Optional transcription when image_or_text is an image. Supplying it grounds draft examples without requiring local OCR.',
+        },
       },
       required: ['image_or_text', 'grade', 'topic'],
       additionalProperties: false,
@@ -291,7 +331,7 @@ const tools: WebMcpTool[] = [
       required: ['constraints'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, untrustedContentHint: false },
+    annotations: { readOnlyHint: false, untrustedContentHint: true },
     execute: toolHandlers.generateDraft,
   },
   {
@@ -339,6 +379,19 @@ const tools: WebMcpTool[] = [
     },
     annotations: { readOnlyHint: false, untrustedContentHint: true },
     execute: toolHandlers.swapQuestion,
+  },
+  {
+    name: 'read_workspace_state',
+    title: 'Read current Classwork workspace',
+    description:
+      'Read the complete visible Classwork state before deciding what to change: source metadata, constraints, stable question IDs and content, plus all four live check results.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    execute: toolHandlers.readWorkspaceState,
   },
   {
     name: 'check_time_estimate',
@@ -428,8 +481,8 @@ export function registerClassworkTools(
           if (registered === tools.length) {
             onStatus?.({
               state: 'ready',
-              count: 8,
-              message: '8 WebMCP tools connected',
+              count: tools.length,
+              message: `${tools.length} WebMCP tools connected`,
             })
           }
         })
@@ -439,7 +492,7 @@ export function registerClassworkTools(
           onStatus?.({
             state: 'error',
             count: registered,
-            message: `${registered}/8 WebMCP tools connected`,
+            message: `${registered}/${tools.length} WebMCP tools connected`,
           })
         })
     } catch (error) {
@@ -448,7 +501,7 @@ export function registerClassworkTools(
       onStatus?.({
         state: 'error',
         count: registered,
-        message: `${registered}/8 WebMCP tools connected`,
+        message: `${registered}/${tools.length} WebMCP tools connected`,
       })
     }
   }

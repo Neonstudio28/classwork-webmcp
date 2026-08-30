@@ -9,3 +9,9 @@
 7. End on the ready state and the product principle:
 
    “This isn't AI writing your worksheet — it's making sure the one you build together actually fits your class.”
+
+## Recorded voiceover
+
+> Classwork turns real Grade 4 material into a shared worksheet. The first draft fails time and balance. A teacher removes one question; all four checks update. The agent swaps fractions for decimals through WebMCP. This isn't AI writing your worksheet — it's making sure the one you build together actually fits your class.
+
+The checked-in MP4 includes this narration. Before submission, upload the narrated file as a public, under-three-minute YouTube video and place that URL in the Devpost entry.

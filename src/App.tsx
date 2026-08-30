@@ -41,7 +41,9 @@ import './App.css'
 import {
   QUESTION_TYPE_LABELS,
   STANDARD_LIBRARY,
+  analyzeSourceMaterial,
   evaluateConstraints,
+  sourceGroundingLabel,
   toPercent,
   type ConstraintSnapshot,
   type Question,
@@ -452,6 +454,9 @@ function App() {
   }
 
   const selectedStandards = new Set(state.constraints.standards)
+  const sourceGrounding = state.source
+    ? sourceGroundingLabel(analyzeSourceMaterial(state.source))
+    : ''
 
   return (
     <>
@@ -466,7 +471,7 @@ function App() {
             <span className="save-state"><Save size={14} /> Saved locally</span>
             <span className={`webmcp-state webmcp-state--${toolStatus.state}`} title={toolStatus.message}>
               <i aria-hidden="true" />
-              {toolStatus.state === 'ready' ? '8 tools connected' : toolStatus.state === 'unsupported' ? 'WebMCP browser required' : toolStatus.message}
+              {toolStatus.state === 'ready' ? `${toolStatus.count} tools connected` : toolStatus.state === 'unsupported' ? 'WebMCP browser required' : toolStatus.message}
             </span>
             <button type="button" className="button button--secondary" onClick={() => window.print()}><Printer size={15} /> Print worksheet</button>
           </div>
@@ -485,7 +490,7 @@ function App() {
                   {state.source.kind === 'image' ? <img src={state.source.content} alt={`Uploaded source: ${state.source.name}`} /> : (
                     <div className="source-note-preview"><FileText size={18} /><p>{state.source.content}</p></div>
                   )}
-                  <div className="source-preview__meta"><strong>{state.source.name}</strong><span>{state.source.topic} · Grade {state.source.grade}</span></div>
+                  <div className="source-preview__meta"><strong>{state.source.name}</strong><span>{state.source.topic} · Grade {state.source.grade}</span><span>{sourceGrounding}</span></div>
                   <button type="button" className="text-button" onClick={() => fileInput.current?.click()}>Replace source</button>
                 </div>
               ) : (
@@ -545,7 +550,7 @@ function App() {
                 <div className="worksheet-title-block">
                   <span>Independent practice</span>
                   <input value={state.worksheet.title} onChange={(event) => workspaceActions.setWorksheetTitle(event.target.value)} aria-label="Worksheet title" />
-                  <p>Grade 4 mathematics · Name ____________________ · Date __________</p>
+                  <p>{state.worksheet.subtitle} · Name ____________________ · Date __________</p>
                 </div>
                 <div className="question-list">
                   {state.worksheet.questions.map((question, index) => (

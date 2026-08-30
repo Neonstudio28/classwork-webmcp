@@ -30,10 +30,18 @@ export interface WorksheetConstraints {
 export interface SourceMaterial {
   kind: 'image' | 'text'
   content: string
+  extractedText?: string
   name: string
   grade: 4
   topic: string
   addedAt: string
+}
+
+export interface SourceAnalysis {
+  mode: 'source-text' | 'image-transcript' | 'topic-fallback'
+  focus: string[]
+  tenthsNumerator: number
+  decimals: string[]
 }
 
 export interface ActivityItem {
@@ -162,13 +170,82 @@ const round = (value: number, places = 1) => {
 const questionText = (question: Question) =>
   [question.prompt, ...(question.options ?? [])].join(' ')
 
-export function createDraftQuestions(): Question[] {
+export function analyzeSourceMaterial(
+  source: Pick<SourceMaterial, 'kind' | 'content' | 'extractedText' | 'topic'>,
+): SourceAnalysis {
+  const sourceText =
+    source.kind === 'text'
+      ? source.content
+      : source.extractedText?.trim() || source.topic
+  const mode: SourceAnalysis['mode'] =
+    source.kind === 'text'
+      ? 'source-text'
+      : source.extractedText?.trim()
+        ? 'image-transcript'
+        : 'topic-fallback'
+  const focus: string[] = []
+
+  if (/equivalent|denominator|tenths?|hundredths?|\/[\s]*(?:10|100)\b/i.test(sourceText)) {
+    focus.push('equivalent tenths & hundredths')
+  }
+  if (/decimal|notation|\b0\.\d{1,2}\b/i.test(sourceText)) {
+    focus.push('decimal notation')
+  }
+  if (/compare|greater|less|place[ -]?value|[><=]/i.test(sourceText)) {
+    focus.push('decimal comparison')
+  }
+  if (!focus.length) focus.push('fractions & decimals')
+
+  const tenthsMatch = sourceText.match(/\b([1-9])\s*\/\s*10\b/)
+  const decimals = Array.from(
+    new Set(sourceText.match(/\b0\.\d{1,2}\b/g) ?? []),
+  ).slice(0, 4)
+
+  return {
+    mode,
+    focus,
+    tenthsNumerator: tenthsMatch ? Number(tenthsMatch[1]) : 3,
+    decimals,
+  }
+}
+
+export function sourceGroundingLabel(analysis: SourceAnalysis) {
+  if (analysis.mode === 'source-text') return 'Pasted examples ground this draft'
+  if (analysis.mode === 'image-transcript') return 'Image transcript grounds this draft'
+  return 'Topic-guided fallback · no local image OCR'
+}
+
+export function createDraftQuestions(
+  analysis: SourceAnalysis = {
+    mode: 'topic-fallback',
+    focus: ['fractions & decimals'],
+    tenthsNumerator: 3,
+    decimals: [],
+  },
+): Question[] {
+  const tenthsFraction = `${analysis.tenthsNumerator}/10`
+  const equivalentHundredths = `${analysis.tenthsNumerator * 10}/100`
+  const comparisonQuestion = analysis.decimals.length >= 2
+    ? {
+        prompt: `Which symbol makes ${analysis.decimals[0]} __ ${analysis.decimals[1]} true?`,
+        options: ['>', '<', '=', 'Not enough information'],
+      }
+    : {
+        prompt: 'Which decimal is greater than 0.48 but less than 0.60?',
+        options: ['0.40', '0.50', '0.68', '0.84'],
+      }
+
   return [
     {
       id: 'q-equivalent-tenths',
       type: 'multiple-choice',
-      prompt: 'Which fraction with a denominator of 100 is equivalent to 3/10?',
-      options: ['3/100', '13/100', '30/100', '300/100'],
+      prompt: `Which fraction with a denominator of 100 is equivalent to ${tenthsFraction}?`,
+      options: [
+        `${analysis.tenthsNumerator}/100`,
+        `${analysis.tenthsNumerator + 10}/100`,
+        equivalentHundredths,
+        `${analysis.tenthsNumerator * 100}/100`,
+      ],
       standardIds: ['4.NF.C.5'],
     },
     {
@@ -181,8 +258,8 @@ export function createDraftQuestions(): Question[] {
     {
       id: 'q-between-decimals',
       type: 'multiple-choice',
-      prompt: 'Which decimal is greater than 0.48 but less than 0.60?',
-      options: ['0.40', '0.50', '0.68', '0.84'],
+      prompt: comparisonQuestion.prompt,
+      options: comparisonQuestion.options,
       standardIds: ['4.NF.C.7'],
     },
     {
@@ -209,11 +286,22 @@ export function createDraftQuestions(): Question[] {
   ]
 }
 
-export function createDraftWorksheet(topic = 'Fractions & decimals'): Worksheet {
+export function createDraftWorksheet(
+  topic = 'Fractions & decimals',
+  source?: Pick<SourceMaterial, 'kind' | 'content' | 'extractedText' | 'topic'>,
+): Worksheet {
+  const analysis = source
+    ? analyzeSourceMaterial(source)
+    : {
+        mode: 'topic-fallback' as const,
+        focus: ['fractions & decimals'],
+        tenthsNumerator: 3,
+        decimals: [],
+      }
   return {
     title: 'Fractions as Decimals',
-    subtitle: `Grade 4 mathematics · ${topic}`,
-    questions: createDraftQuestions(),
+    subtitle: `Grade 4 mathematics · ${topic} · Source focus: ${analysis.focus.join(', ')}`,
+    questions: createDraftQuestions(analysis),
     updatedAt: new Date().toISOString(),
   }
 }
