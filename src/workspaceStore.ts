@@ -2,7 +2,6 @@ import {
   DEFAULT_CONSTRAINTS,
   EMPTY_WORKSHEET,
   QUESTION_TYPE_LABELS,
-  STANDARD_LIBRARY,
   createDraftWorksheet,
   evaluateConstraints,
   assertQuestionContent,
@@ -370,16 +369,22 @@ export const workspaceActions = {
   },
 
   addQuestion(type: QuestionType = 'short-answer', actor: ActivityActor = 'teacher') {
-    const standardId = state.constraints.standards[0] ?? STANDARD_LIBRARY[0].id
-    const question: Question = {
-      id: uid('q'),
-      type,
-      prompt: 'Write a new question for students.',
-      standardIds: [standardId],
-      ...(type === 'multiple-choice'
-        ? { options: ['Choice A', 'Choice B', 'Choice C', 'Choice D'] }
-        : {}),
+    const questionContent: Record<QuestionType, Omit<Question, 'id' | 'type'>> = {
+      'multiple-choice': {
+        prompt: 'Which decimal is equal to 45/100?',
+        options: ['0.045', '0.45', '4.5', '45.0'],
+        standardIds: ['4.NF.C.6'],
+      },
+      'short-answer': {
+        prompt: 'Compare 0.54 and 0.45 using >, <, or =. Explain your answer using place value.',
+        standardIds: ['4.NF.C.7'],
+      },
+      'extended-response': {
+        prompt: 'Use two models to show why 3/10 and 30/100 are equivalent. Then write both fractions as decimals.',
+        standardIds: ['4.NF.C.5', '4.NF.C.6'],
+      },
     }
+    const question: Question = { id: uid('q'), type, ...questionContent[type] }
     commit((current) => ({
       ...current,
       worksheet: {

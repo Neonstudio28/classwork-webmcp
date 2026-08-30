@@ -6,7 +6,7 @@ The worksheet is not “done” when text exists. It is done when all four check
 
 ## Live deployment
 
-[Open Classwork on Cloudflare](https://classwork-webmcp.dot-loganberry.workers.dev/)
+[Open Classwork on Cloudflare](https://classwork-webmcp.hulking-arrow.workers.dev/)
 
 This URL was deployed and exercised in ChatGPT’s in-app browser. It currently uses Cloudflare’s temporary preview account; redeploy from an authenticated Cloudflare account for a durable hackathon submission URL.
 
@@ -30,6 +30,10 @@ Closing line for the demo video:
 A normal chat window can suggest worksheet text, but it cannot reliably maintain a structured, page-scoped model of question IDs, response types, ordering, standards tags, and teacher edits. Classwork’s four `check_*` tools need live structured access to the worksheet that is actually visible—not a stale copy pasted into chat.
 
 WebMCP gives the agent imperative tools bound to the current document. A teacher can rewrite, reorder, or remove a question directly while an agent can edit or swap a question through a registered tool; both paths mutate the same localStorage-backed store and rerun the same constraint functions. The agent therefore reasons about the teacher’s current worksheet instead of reconstructing it from conversation history.
+
+### Browser support for the agent path
+
+Using Classwork's agent-editing and `check_*` tool-calling path currently requires a WebMCP-enabled browser: ChatGPT's in-app browser, or Chrome with the experimental WebMCP flag enabled. Regular Chrome without that flag, Safari, and Firefox do not currently expose the imperative `document.modelContext` API, so they can use the complete teacher-facing editor but cannot invoke the WebMCP agent tools.
 
 ## Registered WebMCP tools
 
