@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900">
+  <rect width="1200" height="900" fill="#d8ddda"/>
+  <rect x="143" y="54" width="914" height="792" rx="18" fill="#c2c9c5" opacity=".42" transform="rotate(1 600 450)"/>
+  <g transform="rotate(-1.4 600 450)">
+    <rect x="128" y="40" width="914" height="792" rx="8" fill="#fbfaf4"/>
+    <rect x="128" y="40" width="914" height="792" rx="8" fill="none" stroke="#bbb9ae" stroke-width="2"/>
+    <text x="198" y="120" font-family="Arial, sans-serif" font-size="18" fill="#77746d">GRADE 4 · UNIT 6 REVIEW</text>
+    <text x="198" y="165" font-family="Arial, sans-serif" font-size="32" font-weight="600" fill="#282d2b">Fractions &amp; Decimals</text>
+    <line x1="198" y1="190" x2="970" y2="190" stroke="#c9c7bd" stroke-width="2"/>
+    <text x="198" y="238" font-family="Arial, sans-serif" font-size="20" fill="#343a38">1. Rename each fraction in hundredths.</text>
+    <text x="235" y="285" font-family="Arial, sans-serif" font-size="25" fill="#343a38">3/10 = ____/100</text>
+    <text x="560" y="285" font-family="Arial, sans-serif" font-size="25" fill="#343a38">7/10 = ____/100</text>
+    <path d="M403 278c18 18 38 9 54-16" fill="none" stroke="#6f837a" stroke-width="5" stroke-linecap="round"/>
+    <text x="198" y="350" font-family="Arial, sans-serif" font-size="20" fill="#343a38">2. Write each value as a decimal.</text>
+    <text x="235" y="397" font-family="Arial, sans-serif" font-size="25" fill="#343a38">62/100 = ______</text>
+    <text x="560" y="397" font-family="Arial, sans-serif" font-size="25" fill="#343a38">4/10 = ______</text>
+    <text x="198" y="462" font-family="Arial, sans-serif" font-size="20" fill="#343a38">3. Compare. Use &gt;, &lt;, or =.</text>
+    <text x="235" y="510" font-family="Arial, sans-serif" font-size="25" fill="#343a38">0.48 ____ 0.50</text>
+    <text x="560" y="510" font-family="Arial, sans-serif" font-size="25" fill="#343a38">0.60 ____ 0.6</text>
+    <path d="M376 500l18 13 20-30" fill="none" stroke="#6f837a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="198" y="575" font-family="Arial, sans-serif" font-size="20" fill="#343a38">4. Explain one comparison with place-value reasoning.</text>
+    <line x1="235" y1="622" x2="930" y2="622" stroke="#aaa99f" stroke-width="2"/>
+    <line x1="235" y1="670" x2="930" y2="670" stroke="#aaa99f" stroke-width="2"/>
+    <line x1="235" y1="718" x2="930" y2="718" stroke="#aaa99f" stroke-width="2"/>
+    <text x="780" y="784" font-family="Arial, sans-serif" font-size="16" font-style="italic" fill="#7e847f">Aim for 15 minutes</text>
+  </g>
+</svg>

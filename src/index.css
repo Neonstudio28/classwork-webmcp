@@ -1,0 +1,114 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", sans-serif;
+  color: #1a2523;
+  background: hsl(210 22% 96%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --surface-page: hsl(210 22% 96%);
+  --surface-solid: #f9fbfa;
+  --surface-input: rgba(248, 251, 250, 0.84);
+  --ink-strong: #17211f;
+  --ink: #2f3b38;
+  --ink-muted: #66736f;
+  --ink-faint: #687570;
+  --line: rgba(42, 58, 54, 0.11);
+  --glass-edge: rgba(255, 255, 255, 0.16);
+  --accent: #56796f;
+  --accent-strong: #365d54;
+  --accent-soft: rgba(86, 121, 111, 0.12);
+  --satisfied: #527565;
+  --satisfied-soft: rgba(82, 117, 101, 0.12);
+  --attention: #975f58;
+  --attention-soft: rgba(151, 95, 88, 0.11);
+  --amber: #917044;
+  --amber-soft: rgba(145, 112, 68, 0.11);
+  --focus: #2f6559;
+  --radius-small: 10px;
+  --radius-panel: 18px;
+  --shadow-raised: 0 14px 36px rgba(36, 51, 47, 0.07), 0 2px 7px rgba(36, 51, 47, 0.04);
+  --shadow-floating: 0 22px 54px rgba(31, 47, 43, 0.11), 0 4px 12px rgba(31, 47, 43, 0.06);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--surface-page);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--surface-page);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+select {
+  cursor: pointer;
+}
+
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+}
+
+button,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(86, 121, 111, 0.22);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
