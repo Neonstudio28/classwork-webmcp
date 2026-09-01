@@ -10,16 +10,19 @@ const dataDirectory = process.env.CLASSWORK_DATA_DIR?.trim()
   : join(appRoot, 'data')
 const distDirectory = join(appRoot, 'dist')
 const maximumRequestBytes = 14_500_000
-mkdirSync(dataDirectory, { recursive: true })
-
-const database = new DatabaseSync(join(dataDirectory, 'classwork.sqlite'))
-database.exec(`
-  CREATE TABLE IF NOT EXISTS workspaces (
-    id TEXT PRIMARY KEY,
-    state_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )
-`)
+const usesSqlitePersistence = process.env.VERCEL !== '1' && process.env.CLASSWORK_DISABLE_SQLITE !== 'true'
+let database = null
+if (usesSqlitePersistence) {
+  mkdirSync(dataDirectory, { recursive: true })
+  database = new DatabaseSync(join(dataDirectory, 'classwork.sqlite'))
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id TEXT PRIMARY KEY,
+      state_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+}
 
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -63,19 +66,39 @@ function isLoopbackHostname(hostname) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
 }
 
+function normalizeHostname(value) {
+  if (typeof value !== 'string' || !value.trim()) return ''
+  try {
+    const url = new URL(value.includes('://') ? value : `https://${value}`)
+    return url.hostname.toLowerCase().replace(/\.$/, '')
+  } catch {
+    return ''
+  }
+}
+
+function configuredDeploymentHostnames() {
+  return new Set([
+    process.env.VERCEL_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    ...(process.env.CLASSWORK_ALLOWED_HOSTS ?? '').split(','),
+  ].map(normalizeHostname).filter(Boolean))
+}
+
 function requestHostname(request) {
   const host = request.headers.host
   if (!host) return ''
   try {
-    return new URL(`http://${host}`).hostname
+    return new URL(`http://${host}`).hostname.toLowerCase().replace(/\.$/, '')
   } catch {
     return ''
   }
 }
 
 function validateApiRequest(request) {
-  if (!isLoopbackHostname(requestHostname(request))) {
-    throw new HttpError(403, 'LOCAL_API_ONLY', 'The Classwork API only accepts local requests.')
+  const hostname = requestHostname(request)
+  const allowedDeploymentHost = configuredDeploymentHostnames().has(hostname)
+  if (!isLoopbackHostname(hostname) && !allowedDeploymentHost) {
+    throw new HttpError(403, 'LOCAL_API_ONLY', 'The Classwork API does not accept this host.')
   }
 
   if (request.headers['sec-fetch-site'] === 'cross-site') {
@@ -86,11 +109,14 @@ function validateApiRequest(request) {
   if (origin) {
     let originHostname = ''
     try {
-      originHostname = new URL(origin).hostname
+      originHostname = new URL(origin).hostname.toLowerCase().replace(/\.$/, '')
     } catch {
       throw new HttpError(403, 'CROSS_ORIGIN_REQUEST', 'Cross-origin API requests are not allowed.')
     }
-    if (!isLoopbackHostname(originHostname)) {
+    if (
+      (!isLoopbackHostname(hostname) && originHostname !== hostname) ||
+      (isLoopbackHostname(hostname) && !isLoopbackHostname(originHostname))
+    ) {
       throw new HttpError(403, 'CROSS_ORIGIN_REQUEST', 'Cross-origin API requests are not allowed.')
     }
   }
@@ -601,6 +627,14 @@ async function readJson(request) {
 }
 
 async function handleWorkspace(request, response, id) {
+  if (!database) {
+    sendJson(response, 503, {
+      code: 'PERSISTENCE_UNAVAILABLE',
+      error: 'Server persistence is unavailable in this deployment; browser storage remains active.',
+    })
+    return
+  }
+
   if (request.method === 'GET') {
     const row = database.prepare(
       'SELECT state_json, updated_at FROM workspaces WHERE id = ?',
@@ -654,7 +688,7 @@ function serveFile(response, requestedPath) {
   createReadStream(safePath).pipe(response)
 }
 
-const server = createServer(async (request, response) => {
+export async function handleRequest(request, response) {
   try {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1')
     if (url.pathname.startsWith('/api/')) validateApiRequest(request)
@@ -675,7 +709,7 @@ const server = createServer(async (request, response) => {
       const configuration = generationConfiguration()
       sendJson(response, 200, {
         ok: true,
-        database: 'sqlite',
+        database: database ? 'sqlite' : 'browser',
         aiEnabled: configuration.enabled,
         aiConfigured: configuration.configured,
         model: configuration.configured ? configuration.model : null,
@@ -695,15 +729,18 @@ const server = createServer(async (request, response) => {
     console.error('Unexpected Classwork server error:', error)
     sendJson(response, 500, { code: 'INTERNAL_ERROR', error: 'Unexpected server error.' })
   }
-})
+}
 
-const port = Number(process.env.CLASSWORK_PORT || 8787)
-server.listen(port, '127.0.0.1', () => {
-  const address = server.address()
-  const listeningPort = typeof address === 'object' && address ? address.port : port
-  console.log(`Classwork server ready at http://127.0.0.1:${listeningPort}`)
-})
+if (process.env.VERCEL !== '1') {
+  const server = createServer(handleRequest)
+  const port = Number(process.env.CLASSWORK_PORT || 8787)
+  server.listen(port, '127.0.0.1', () => {
+    const address = server.address()
+    const listeningPort = typeof address === 'object' && address ? address.port : port
+    console.log(`Classwork server ready at http://127.0.0.1:${listeningPort}`)
+  })
 
-server.requestTimeout = 55_000
-server.headersTimeout = 10_000
-server.keepAliveTimeout = 5_000
+  server.requestTimeout = 55_000
+  server.headersTimeout = 10_000
+  server.keepAliveTimeout = 5_000
+}

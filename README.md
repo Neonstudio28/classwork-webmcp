@@ -144,6 +144,10 @@ server/
 
 The included `netlify.toml` can still publish the standalone frontend, which falls back to browser storage when `/api` is unavailable. A production database deployment requires an explicitly selected and authorized server/database destination; classroom source material is not silently uploaded to a third party.
 
+## Vercel deployment
+
+`vercel.json` deploys the Vite frontend and the shared Node API handler. Vercel Functions do not provide durable SQLite storage, so the hosted app deliberately keeps worksheet persistence in browser storage while `/api/generate` and `/api/swap` use the server-only Gemini configuration. Local development continues to use SQLite. Configure `CLASSWORK_AI_ENABLED`, `GEMINI_API_KEY`, and `GEMINI_MODEL` as encrypted Vercel environment variables before the production deployment.
+
 ## License
 
 [MIT](./LICENSE)

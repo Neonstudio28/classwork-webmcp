@@ -26,3 +26,6 @@ dist-ssr
 # Local Classwork database
 data/*.sqlite
 data/*.sqlite-*
+.vercel
+.env*
+!.env.example

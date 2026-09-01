@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -9,6 +10,35 @@ let child
 let baseUrl
 let testDataDirectory
 
+function requestWithHost(path, { method = 'GET', host, origin, contentType, body = '' }) {
+  const target = new URL(path)
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({
+      hostname: target.hostname,
+      port: target.port,
+      path: target.pathname,
+      method,
+      headers: {
+        host,
+        origin,
+        ...(contentType ? { 'content-type': contentType } : {}),
+        ...(body ? { 'content-length': Buffer.byteLength(body) } : {}),
+      },
+    }, (response) => {
+      const chunks = []
+      response.on('data', (chunk) => chunks.push(chunk))
+      response.on('end', () => {
+        resolve({
+          status: response.statusCode,
+          payload: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+        })
+      })
+    })
+    request.on('error', reject)
+    request.end(body)
+  })
+}
+
 before(async () => {
   testDataDirectory = await mkdtemp(join(tmpdir(), 'classwork-server-test-'))
   child = spawn(process.execPath, ['server/index.mjs'], {
@@ -16,6 +46,7 @@ before(async () => {
     env: {
       ...process.env,
       CLASSWORK_AI_ENABLED: 'false',
+      CLASSWORK_ALLOWED_HOSTS: 'classwork.example',
       CLASSWORK_DATA_DIR: testDataDirectory,
       CLASSWORK_PORT: '0',
     },
@@ -66,6 +97,27 @@ test('hostile browser origins are rejected before body handling', async () => {
   })
   assert.equal(response.status, 403)
   assert.equal((await response.json()).code, 'CROSS_ORIGIN_REQUEST')
+})
+
+test('configured deployment host accepts its matching browser origin', async () => {
+  const response = await requestWithHost(`${baseUrl}/api/health`, {
+    host: 'classwork.example',
+    origin: 'https://classwork.example',
+  })
+  assert.equal(response.status, 200)
+  assert.equal(response.payload.ok, true)
+})
+
+test('configured deployment host rejects a different browser origin', async () => {
+  const response = await requestWithHost(`${baseUrl}/api/generate`, {
+    method: 'POST',
+    host: 'classwork.example',
+    origin: 'https://evil.example',
+    contentType: 'application/json',
+    body: '{}',
+  })
+  assert.equal(response.status, 403)
+  assert.equal(response.payload.code, 'CROSS_ORIGIN_REQUEST')
 })
 
 test('API mutations require JSON', async () => {
