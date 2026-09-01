@@ -61,14 +61,14 @@ function isAbortError(error: unknown) {
 const questionSchema: JsonSchema = {
   type: 'object',
   properties: {
-    id: { type: 'string' },
+    id: { type: 'string', minLength: 1, maxLength: 120 },
     type: {
       type: 'string',
       enum: ['multiple-choice', 'short-answer', 'extended-response'],
     },
-    prompt: { type: 'string' },
-    options: { type: 'array', items: { type: 'string' } },
-    standardIds: { type: 'array', items: { type: 'string' } },
+    prompt: { type: 'string', minLength: 1, maxLength: 900 },
+    options: { type: 'array', items: { type: 'string', maxLength: 220 }, maxItems: 6 },
+    standardIds: { type: 'array', items: { type: 'string', maxLength: 80 }, maxItems: 8 },
   },
   required: ['id', 'type', 'prompt', 'standardIds'],
   additionalProperties: false,
@@ -86,7 +86,7 @@ const worksheetInputSchema: JsonSchema = {
       properties: {
         title: { type: 'string' },
         subtitle: { type: 'string' },
-        questions: { type: 'array', items: questionSchema },
+        questions: { type: 'array', items: questionSchema, maxItems: 100 },
         updatedAt: { type: 'string' },
       },
       required: ['questions'],
@@ -109,13 +109,61 @@ function asNonEmptyString(value: unknown, field: string) {
   return value.trim()
 }
 
+function asBoundedString(value: unknown, field: string, maximum: number) {
+  const result = asNonEmptyString(value, field)
+  if (result.length > maximum) throw new Error(`${field} must be ${maximum} characters or fewer.`)
+  return result
+}
+
+function asStandardList(value: unknown, field = 'standards') {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 12) {
+    throw new Error(`${field} must contain between 1 and 12 identifiers.`)
+  }
+  return Array.from(new Set(value.map((item, index) =>
+    asBoundedString(item, `${field}[${index}]`, 80),
+  )))
+}
+
+function parseQuestion(value: unknown, index: number): Question {
+  const record = asRecord(value)
+  const type = record.type
+  if (!['multiple-choice', 'short-answer', 'extended-response'].includes(String(type))) {
+    throw new Error(`worksheet.questions[${index}].type is invalid.`)
+  }
+  let options: string[] | undefined
+  if (record.options !== undefined) {
+    if (!Array.isArray(record.options) || record.options.length > 6) {
+      throw new Error(`worksheet.questions[${index}].options must contain at most 6 items.`)
+    }
+    options = record.options.map((item, optionIndex) =>
+      asBoundedString(item, `worksheet.questions[${index}].options[${optionIndex}]`, 220),
+    )
+  }
+  let standardIds: string[] = []
+  if (record.standardIds !== undefined) {
+    if (!Array.isArray(record.standardIds) || record.standardIds.length > 8) {
+      throw new Error(`worksheet.questions[${index}].standardIds must contain at most 8 items.`)
+    }
+    standardIds = record.standardIds.map((item, standardIndex) =>
+      asBoundedString(item, `worksheet.questions[${index}].standardIds[${standardIndex}]`, 80),
+    )
+  }
+  return {
+    id: asBoundedString(record.id, `worksheet.questions[${index}].id`, 120),
+    type: type as Question['type'],
+    prompt: asBoundedString(record.prompt, `worksheet.questions[${index}].prompt`, 900),
+    ...(options ? { options } : {}),
+    standardIds,
+  }
+}
+
 function resolveWorksheet(value: unknown): Pick<Worksheet, 'questions'> {
   if (value === 'current') return workspaceStore.getSnapshot().worksheet
   const record = asRecord(value)
-  if (!Array.isArray(record.questions)) {
+  if (!Array.isArray(record.questions) || record.questions.length > 100) {
     throw new Error('worksheet.questions must be an array.')
   }
-  return { questions: record.questions as Question[] }
+  return { questions: record.questions.map(parseQuestion) }
 }
 
 function conciseState() {
@@ -136,22 +184,24 @@ function conciseState() {
 export const toolHandlers = {
   addSourceMaterial(input: unknown) {
     const record = asRecord(input)
-    const imageOrText = asNonEmptyString(record.image_or_text, 'image_or_text')
+    const imageOrText = asBoundedString(record.image_or_text, 'image_or_text', 14_000_000)
     const grade = Number(record.grade)
-    const topic = asNonEmptyString(record.topic, 'topic')
+    const subject = asBoundedString(record.subject, 'subject', 80)
+    const topic = asBoundedString(record.topic, 'topic', 120)
     const extractedText = record.extracted_text === undefined
       ? undefined
-      : asNonEmptyString(record.extracted_text, 'extracted_text')
+      : asBoundedString(record.extracted_text, 'extracted_text', 12_000)
     const source = workspaceActions.addSourceMaterial(
       imageOrText,
       grade,
+      subject,
       topic,
       'Added by classroom agent',
       'agent',
       extractedText,
     )
     return {
-      source: { kind: source.kind, grade: source.grade, topic: source.topic },
+      source: { kind: source.kind, grade: source.grade, subject: source.subject, topic: source.topic },
       visibleState: conciseState(),
     }
   },
@@ -168,6 +218,7 @@ export const toolHandlers = {
             kind: current.source.kind,
             name: current.source.name,
             grade: current.source.grade,
+            subject: current.source.subject,
             topic: current.source.topic,
             grounding: sourceAnalysis
               ? sourceGroundingLabel(sourceAnalysis)
@@ -179,13 +230,14 @@ export const toolHandlers = {
           }
         : null,
       constraints: current.constraints,
+      profile: current.profile,
       worksheet: current.worksheet,
       checks,
       hasDraft: current.hasDraft,
     }
   },
 
-  generateDraft(input: unknown) {
+  async generateDraft(input: unknown) {
     const record = asRecord(input)
     const rawConstraints = asRecord(record.constraints)
     const questionMix = asRecord(rawConstraints.question_mix)
@@ -197,17 +249,22 @@ export const toolHandlers = {
         'short-answer': Number(questionMix['short-answer']),
         'extended-response': Number(questionMix['extended-response']),
       },
-      standards: Array.isArray(rawConstraints.standards)
-        ? rawConstraints.standards.map(String)
-        : [],
+      standards: asStandardList(rawConstraints.standards),
     }
-    if (!Number.isFinite(constraints.timeLimit) || constraints.timeLimit! <= 0) {
-      throw new Error('time_limit must be a positive number.')
+    if (!Number.isFinite(constraints.timeLimit) || constraints.timeLimit! < 5 || constraints.timeLimit! > 45) {
+      throw new Error('time_limit must be between 5 and 45.')
     }
-    if (!Number.isFinite(constraints.readingLevel)) {
-      throw new Error('reading_level must be a number.')
+    if (!Number.isFinite(constraints.readingLevel) || constraints.readingLevel! < 1 || constraints.readingLevel! > 12) {
+      throw new Error('reading_level must be between 1 and 12.')
     }
-    const worksheet = workspaceActions.generateDraft(constraints, 'agent')
+    const mixValues = Object.values(constraints.questionMix!)
+    if (
+      mixValues.some((value) => !Number.isFinite(value) || value < 0 || value > 1) ||
+      Math.abs(mixValues.reduce((sum, value) => sum + value, 0) - 1) > 0.02
+    ) {
+      throw new Error('question_mix values must be ratios from 0 to 1 that add up to 1.')
+    }
+    const worksheet = await workspaceActions.generateDraft(constraints, 'agent', 14_000)
     return {
       worksheet: { title: worksheet.title, questionCount: worksheet.questions.length },
       visibleState: conciseState(),
@@ -216,19 +273,26 @@ export const toolHandlers = {
 
   editQuestion(input: unknown) {
     const record = asRecord(input)
-    const id = asNonEmptyString(record.id, 'id')
-    const changes = asRecord(record.changes) as Partial<
-      Pick<Question, 'prompt' | 'type' | 'options' | 'standardIds'>
-    >
+    const id = asBoundedString(record.id, 'id', 120)
+    const rawChanges = asRecord(record.changes)
+    const allowedChangeKeys = ['prompt', 'type', 'options', 'standardIds']
+    if (!Object.keys(rawChanges).length || Object.keys(rawChanges).some((key) => !allowedChangeKeys.includes(key))) {
+      throw new Error('changes must contain only prompt, type, options, or standardIds.')
+    }
+    if (rawChanges.prompt !== undefined && typeof rawChanges.prompt !== 'string') throw new Error('changes.prompt must be a string.')
+    if (rawChanges.type !== undefined && !['multiple-choice', 'short-answer', 'extended-response'].includes(String(rawChanges.type))) throw new Error('changes.type is invalid.')
+    if (rawChanges.options !== undefined && (!Array.isArray(rawChanges.options) || rawChanges.options.length > 6)) throw new Error('changes.options must contain at most 6 strings.')
+    if (rawChanges.standardIds !== undefined && (!Array.isArray(rawChanges.standardIds) || rawChanges.standardIds.length > 8)) throw new Error('changes.standardIds must contain at most 8 strings.')
+    const changes = rawChanges as Partial<Pick<Question, 'prompt' | 'type' | 'options' | 'standardIds'>>
     const question = workspaceActions.editQuestion(id, changes, 'agent', true)
     return { question, visibleState: conciseState() }
   },
 
-  swapQuestion(input: unknown) {
+  async swapQuestion(input: unknown) {
     const record = asRecord(input)
-    const id = asNonEmptyString(record.id, 'id')
-    const reason = asNonEmptyString(record.reason, 'reason')
-    const question = workspaceActions.swapQuestion(id, reason, 'agent')
+    const id = asBoundedString(record.id, 'id', 120)
+    const reason = asBoundedString(record.reason, 'reason', 400)
+    const question = await workspaceActions.swapQuestion(id, reason, 'agent', 14_000)
     return { question, visibleState: conciseState() }
   },
 
@@ -265,10 +329,7 @@ export const toolHandlers = {
   checkCoverage(input: unknown) {
     const record = asRecord(input)
     const worksheet = resolveWorksheet(record.worksheet)
-    if (!Array.isArray(record.standards)) {
-      throw new Error('standards must be an array of standard identifiers.')
-    }
-    return checkStandardCoverage(worksheet, record.standards.map(String))
+    return checkStandardCoverage(worksheet, asStandardList(record.standards))
   },
 }
 
@@ -277,23 +338,26 @@ const tools: WebMcpTool[] = [
     name: 'add_source_material',
     title: 'Add source material',
     description:
-      'Stage a photo data URL, image URL, or pasted classroom text as the source for the visible Grade 4 mathematics worksheet. This changes the source panel but does not generate questions.',
+      'Stage an inline PNG, JPEG, or WebP data URL, or pasted classroom text, for a configurable grade, subject, and topic. Remote image URLs are rejected. This updates the same persisted workspace visible to the teacher but does not generate questions.',
     inputSchema: {
       type: 'object',
       properties: {
         image_or_text: {
           type: 'string',
-          description: 'Image data URL, image URL, or the source text to use.',
+          maxLength: 14000000,
+          description: 'Inline PNG, JPEG, or WebP data URL, or source text to use. Remote URLs are not accepted.',
         },
-        grade: { type: 'integer', const: 4 },
-        topic: { type: 'string' },
+        grade: { type: 'integer', minimum: 1, maximum: 12 },
+        subject: { type: 'string', minLength: 1, maxLength: 80 },
+        topic: { type: 'string', minLength: 1, maxLength: 120 },
         extracted_text: {
           type: 'string',
+          maxLength: 12000,
           description:
             'Optional transcription when image_or_text is an image. Supplying it grounds draft examples without requiring local OCR.',
         },
       },
-      required: ['image_or_text', 'grade', 'topic'],
+      required: ['image_or_text', 'grade', 'subject', 'topic'],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, untrustedContentHint: true },
@@ -303,7 +367,7 @@ const tools: WebMcpTool[] = [
     name: 'generate_draft',
     title: 'Generate worksheet draft',
     description:
-      'Create and display a Grade 4 fractions-and-decimals worksheet from the staged source using explicit time, reading, mix, and standards constraints.',
+      'Create and display a source-grounded worksheet using explicit time, reading, mix, and standards constraints. For an uploaded image source, Gemini reads the image bytes directly and extracts visible content before generating.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -311,7 +375,7 @@ const tools: WebMcpTool[] = [
           type: 'object',
           properties: {
             time_limit: { type: 'number', minimum: 5, maximum: 45 },
-            reading_level: { type: 'number', minimum: 3, maximum: 5 },
+            reading_level: { type: 'number', minimum: 1, maximum: 12 },
             question_mix: {
               type: 'object',
               properties: {
@@ -322,7 +386,7 @@ const tools: WebMcpTool[] = [
               required: ['multiple-choice', 'short-answer', 'extended-response'],
               additionalProperties: false,
             },
-            standards: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            standards: { type: 'array', items: { type: 'string', maxLength: 80 }, minItems: 1, maxItems: 12 },
           },
           required: ['time_limit', 'reading_level', 'question_mix', 'standards'],
           additionalProperties: false,
@@ -342,7 +406,7 @@ const tools: WebMcpTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string' },
+        id: { type: 'string', minLength: 1, maxLength: 120 },
         changes: {
           type: 'object',
           properties: {
@@ -351,8 +415,8 @@ const tools: WebMcpTool[] = [
               type: 'string',
               enum: ['multiple-choice', 'short-answer', 'extended-response'],
             },
-            options: { type: 'array', items: { type: 'string' }, maxItems: 6 },
-            standardIds: { type: 'array', items: { type: 'string' } },
+            options: { type: 'array', items: { type: 'string', maxLength: 220 }, maxItems: 6 },
+            standardIds: { type: 'array', items: { type: 'string', maxLength: 80 }, maxItems: 8 },
           },
           additionalProperties: false,
         },
@@ -367,11 +431,11 @@ const tools: WebMcpTool[] = [
     name: 'swap_question',
     title: 'Swap a worksheet question',
     description:
-      'Replace one visible question while preserving its position and question type. The reason guides the replacement; use this for teacher requests such as swapping a fractions item for a decimals item.',
+      'Replace one visible question while preserving its position and question type. The reason names the concept and revision the teacher wants.',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string' },
+        id: { type: 'string', minLength: 1, maxLength: 120 },
         reason: { type: 'string', minLength: 1, maxLength: 400 },
       },
       required: ['id', 'reason'],
@@ -444,7 +508,7 @@ const tools: WebMcpTool[] = [
       type: 'object',
       properties: {
         worksheet: worksheetInputSchema,
-        standards: { type: 'array', items: { type: 'string' }, minItems: 1 },
+        standards: { type: 'array', items: { type: 'string', maxLength: 80 }, minItems: 1, maxItems: 12 },
       },
       required: ['worksheet', 'standards'],
       additionalProperties: false,

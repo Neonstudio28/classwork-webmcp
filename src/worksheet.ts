@@ -27,12 +27,19 @@ export interface WorksheetConstraints {
   standards: string[]
 }
 
+export interface ClassProfile {
+  grade: number
+  subject: string
+  topic: string
+}
+
 export interface SourceMaterial {
   kind: 'image' | 'text'
   content: string
   extractedText?: string
   name: string
-  grade: 4
+  grade: number
+  subject: string
   topic: string
   addedAt: string
 }
@@ -42,6 +49,15 @@ export interface SourceAnalysis {
   focus: string[]
   tenthsNumerator: number
   decimals: string[]
+  fractions: Array<{ numerator: number; denominator: number }>
+  fractionComparison?: {
+    left: { numerator: number; denominator: number }
+    right: { numerator: number; denominator: number }
+    commonDenominator: number
+    leftEquivalentNumerator: number
+    rightEquivalentNumerator: number
+    relation: '>' | '<' | '='
+  }
 }
 
 export interface ActivityItem {
@@ -53,7 +69,9 @@ export interface ActivityItem {
 }
 
 export interface WorkspaceState {
-  version: 1
+  version: 2
+  modifiedAt: string
+  profile: ClassProfile
   source: SourceMaterial | null
   worksheet: Worksheet
   constraints: WorksheetConstraints
@@ -110,6 +128,12 @@ export const QUESTION_TYPE_LABELS: Record<QuestionType, string> = {
 
 export const STANDARD_LIBRARY = [
   {
+    id: '4.NF.A.2',
+    short: 'Compare fractions',
+    description:
+      'Compare two fractions with different numerators and denominators using common benchmarks or denominators.',
+  },
+  {
     id: '4.NF.C.5',
     short: 'Equivalent tenths & hundredths',
     description:
@@ -129,6 +153,12 @@ export const STANDARD_LIBRARY = [
   },
 ] as const
 
+export const DEFAULT_PROFILE: ClassProfile = {
+  grade: 4,
+  subject: '',
+  topic: '',
+}
+
 export const DEFAULT_CONSTRAINTS: WorksheetConstraints = {
   timeLimit: 15,
   readingLevel: 4,
@@ -137,24 +167,16 @@ export const DEFAULT_CONSTRAINTS: WorksheetConstraints = {
     'short-answer': 0.4,
     'extended-response': 0.2,
   },
-  standards: STANDARD_LIBRARY.map((standard) => standard.id),
+  standards: [],
 }
 
 // Ten percentage points is the declared tolerance for each response mode.
 // Keep this as a ratio (0.10), matching `actual` and `target` below.
 export const QUESTION_MIX_TOLERANCE = 0.1
 
-export const DEMO_SOURCE_TEXT = `Grade 4 mathematics — fractions and decimals
-
-• Review how tenths can be renamed as hundredths.
-• Connect 3/10 to 30/100 and to decimal notation.
-• Compare decimals to hundredths using >, <, and =.
-• Ask students to explain one comparison with a model or place-value reasoning.
-• Keep the independent practice to about 15 minutes.`
-
 export const EMPTY_WORKSHEET: Worksheet = {
-  title: 'Fractions as Decimals',
-  subtitle: 'Grade 4 mathematics · Independent practice',
+  title: '',
+  subtitle: '',
   questions: [],
   updatedAt: new Date(0).toISOString(),
 }
@@ -184,17 +206,61 @@ export function analyzeSourceMaterial(
         ? 'image-transcript'
         : 'topic-fallback'
   const focus: string[] = []
+  const fractions = Array.from(
+    sourceText.matchAll(/\b(\d{1,3})\s*\/\s*(\d{1,3})\b/g),
+    (match) => ({
+      numerator: Number(match[1]),
+      denominator: Number(match[2]),
+    }),
+  ).filter(
+    (fraction) =>
+      fraction.denominator > 0 &&
+      fraction.denominator <= 100 &&
+      fraction.numerator >= 0 &&
+      fraction.numerator <= 100,
+  )
+  const comparisonIntent =
+    /common denominators?/i.test(sourceText) ||
+    /compare\s+(?:the\s+)?\d{1,3}\s*\/\s*\d{1,3}[^.!?\n]{0,80}\d{1,3}\s*\/\s*\d{1,3}/i.test(sourceText) ||
+    /which\s+fraction\s+is\s+(?:greater|less)/i.test(sourceText)
+  const [left, right] = fractions
+  const greatestCommonDivisor = (first: number, second: number): number =>
+    second === 0 ? Math.abs(first) : greatestCommonDivisor(second, first % second)
+  const fractionComparison = comparisonIntent && left && right
+    ? (() => {
+        const divisor = greatestCommonDivisor(left.denominator, right.denominator)
+        const commonDenominator = (left.denominator * right.denominator) / divisor
+        if (commonDenominator > 300) return undefined
+        const leftEquivalentNumerator = left.numerator * (commonDenominator / left.denominator)
+        const rightEquivalentNumerator = right.numerator * (commonDenominator / right.denominator)
+        const relation = leftEquivalentNumerator === rightEquivalentNumerator
+          ? '=' as const
+          : leftEquivalentNumerator > rightEquivalentNumerator
+            ? '>' as const
+            : '<' as const
+        return {
+          left,
+          right,
+          commonDenominator,
+          leftEquivalentNumerator,
+          rightEquivalentNumerator,
+          relation,
+        }
+      })()
+    : undefined
 
-  if (/equivalent|denominator|tenths?|hundredths?|\/[\s]*(?:10|100)\b/i.test(sourceText)) {
+  if (fractionComparison) {
+    focus.push('comparing fractions with unlike denominators')
+  } else if (/equivalent|denominator|tenths?|hundredths?|\/[\s]*(?:10|100)\b/i.test(sourceText)) {
     focus.push('equivalent tenths & hundredths')
   }
   if (/decimal|notation|\b0\.\d{1,2}\b/i.test(sourceText)) {
     focus.push('decimal notation')
   }
-  if (/compare|greater|less|place[ -]?value|[><=]/i.test(sourceText)) {
+  if (!fractionComparison && /compare|greater|less|place[ -]?value|[><=]/i.test(sourceText)) {
     focus.push('decimal comparison')
   }
-  if (!focus.length) focus.push('fractions & decimals')
+  if (!focus.length) focus.push(source.topic.trim() || 'source material')
 
   const tenthsMatch = sourceText.match(/\b([1-9])\s*\/\s*10\b/)
   const decimals = Array.from(
@@ -206,13 +272,91 @@ export function analyzeSourceMaterial(
     focus,
     tenthsNumerator: tenthsMatch ? Number(tenthsMatch[1]) : 3,
     decimals,
+    fractions,
+    fractionComparison,
   }
 }
 
 export function sourceGroundingLabel(analysis: SourceAnalysis) {
-  if (analysis.mode === 'source-text') return 'Pasted examples ground this draft'
-  if (analysis.mode === 'image-transcript') return 'Image transcript grounds this draft'
+  const hasRecognizedExamples = Boolean(
+    analysis.fractionComparison || analysis.fractions.length || analysis.decimals.length,
+  )
+  if (analysis.mode === 'source-text') {
+    return hasRecognizedExamples
+      ? 'Pasted examples ground this draft'
+      : 'Pasted source grounds this draft'
+  }
+  if (analysis.mode === 'image-transcript') {
+    return hasRecognizedExamples
+      ? 'Image transcript grounds this draft'
+      : 'Image transcript grounds this draft'
+  }
   return 'Topic-guided fallback · no local image OCR'
+}
+
+export function hasSourceEvidence(analysis: SourceAnalysis) {
+  return analysis.mode !== 'topic-fallback'
+}
+
+function createFractionComparisonQuestions(
+  comparison: NonNullable<SourceAnalysis['fractionComparison']>,
+): Question[] {
+  const left = `${comparison.left.numerator}/${comparison.left.denominator}`
+  const right = `${comparison.right.numerator}/${comparison.right.denominator}`
+  const leftEquivalent = `${comparison.leftEquivalentNumerator}/${comparison.commonDenominator}`
+  const rightEquivalent = `${comparison.rightEquivalentNumerator}/${comparison.commonDenominator}`
+  const correctComparison = `${left} ${comparison.relation} ${right}`
+
+  return [
+    {
+      id: 'q-compare-fractions',
+      type: 'multiple-choice',
+      prompt: `Which comparison between ${left} and ${right} is true?`,
+      options: [
+        correctComparison,
+        `${left} ${comparison.relation === '>' ? '<' : '>'} ${right}`,
+        `${left} = ${right}`,
+        'Not enough information',
+      ],
+      standardIds: ['4.NF.A.2'],
+    },
+    {
+      id: 'q-common-denominator',
+      type: 'short-answer',
+      prompt: `Rewrite ${left} and ${right} using the common denominator ${comparison.commonDenominator}. Show how each numerator changes.`,
+      standardIds: ['4.NF.A.2'],
+    },
+    {
+      id: 'q-equivalent-pair',
+      type: 'multiple-choice',
+      prompt: `Which pair correctly renames ${left} and ${right} with the same denominator?`,
+      options: [
+        `${leftEquivalent} and ${rightEquivalent}`,
+        `${comparison.left.numerator}/${comparison.commonDenominator} and ${comparison.right.numerator}/${comparison.commonDenominator}`,
+        `${comparison.leftEquivalentNumerator + 1}/${comparison.commonDenominator} and ${rightEquivalent}`,
+        `${leftEquivalent} and ${comparison.rightEquivalentNumerator + 1}/${comparison.commonDenominator}`,
+      ],
+      standardIds: ['4.NF.A.2'],
+    },
+    {
+      id: 'q-explain-comparison',
+      type: 'short-answer',
+      prompt: `Explain how ${leftEquivalent} and ${rightEquivalent} prove that ${correctComparison}.`,
+      standardIds: ['4.NF.A.2'],
+    },
+    {
+      id: 'q-model-comparison',
+      type: 'extended-response',
+      prompt: `Draw equal-size models or a number line for ${left} and ${right}. Label both fractions and use the model to justify ${correctComparison}.`,
+      standardIds: ['4.NF.A.2'],
+    },
+    {
+      id: 'q-correct-misconception',
+      type: 'extended-response',
+      prompt: `A student compares only the numerators in ${left} and ${right}. Explain why that strategy is unreliable, then use the common denominator ${comparison.commonDenominator} to prove the correct comparison.`,
+      standardIds: ['4.NF.A.2'],
+    },
+  ]
 }
 
 export function createDraftQuestions(
@@ -221,10 +365,35 @@ export function createDraftQuestions(
     focus: ['fractions & decimals'],
     tenthsNumerator: 3,
     decimals: [],
+    fractions: [],
   },
 ): Question[] {
+  if (analysis.fractionComparison) {
+    return createFractionComparisonQuestions(analysis.fractionComparison)
+  }
+
   const tenthsFraction = `${analysis.tenthsNumerator}/10`
   const equivalentHundredths = `${analysis.tenthsNumerator * 10}/100`
+  const sourceHundredths = analysis.fractions.find(
+    (fraction) => fraction.denominator === 100,
+  )
+  const hundredthsFraction = sourceHundredths
+    ? `${sourceHundredths.numerator}/100`
+    : equivalentHundredths
+  const hundredthsDecimal = sourceHundredths
+    ? (sourceHundredths.numerator / 100).toFixed(2)
+    : (analysis.tenthsNumerator / 10).toFixed(1)
+  const raceDecimals = analysis.decimals.length >= 3
+    ? analysis.decimals.slice(0, 3)
+    : analysis.decimals.length === 2
+      ? [...analysis.decimals, (Math.max(0, Number(analysis.decimals[0]) - 0.05)).toFixed(2)]
+      : analysis.decimals.length === 1
+        ? [
+            analysis.decimals[0],
+            (Math.max(0, Number(analysis.decimals[0]) - 0.05)).toFixed(2),
+            (Math.min(0.99, Number(analysis.decimals[0]) + 0.04)).toFixed(2),
+          ]
+        : ['0.64', '0.60', '0.58']
   const comparisonQuestion = analysis.decimals.length >= 2
     ? {
         prompt: `Which symbol makes ${analysis.decimals[0]} __ ${analysis.decimals[1]} true?`,
@@ -251,8 +420,7 @@ export function createDraftQuestions(
     {
       id: 'q-shaded-grid',
       type: 'short-answer',
-      prompt:
-        'Mina shaded 4/10 of a grid. Rewrite 4/10 with a denominator of 100 and explain how you know.',
+      prompt: `Mina shaded ${tenthsFraction} of a grid. Rewrite ${tenthsFraction} with a denominator of 100 and explain how you know.`,
       standardIds: ['4.NF.C.5', '4.NF.C.6'],
     },
     {
@@ -265,30 +433,108 @@ export function createDraftQuestions(
     {
       id: 'q-decimal-notation',
       type: 'short-answer',
-      prompt:
-        'Write 62/100 as a decimal. Then name the value of the digit in the hundredths place.',
+      prompt: `Write ${hundredthsFraction} as a decimal. Then explain what the last digit in ${hundredthsDecimal} represents.`,
       standardIds: ['4.NF.C.6'],
     },
     {
       id: 'q-race-times',
       type: 'extended-response',
-      prompt:
-        'Three students finished a short race in 0.64 minute, 0.60 minute, and 0.58 minute. Order the times from least to greatest and explain your comparison using place value.',
+      prompt: `Three students recorded ${raceDecimals[0]}, ${raceDecimals[1]}, and ${raceDecimals[2]}. Order the values from least to greatest and explain your comparison using place value.`,
       standardIds: ['4.NF.C.7'],
     },
     {
       id: 'q-fraction-model',
       type: 'extended-response',
-      prompt:
-        'Draw two models to prove that 7/10 and 70/100 are equivalent fractions. Label each model and describe what stays the same.',
+      prompt: `Draw two models to prove that ${tenthsFraction} and ${equivalentHundredths} are equivalent fractions. Label each model and describe what stays the same.`,
       standardIds: ['4.NF.C.5'],
     },
   ]
 }
 
+function cleanSourceSentences(sourceText: string) {
+  return Array.from(new Set(
+    sourceText
+      .replace(/[•\r]/g, ' ')
+      .split(/(?<=[.!?])\s+|\n+/)
+      .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
+      .filter((sentence) => sentence.length >= 12),
+  )).slice(0, 6)
+}
+
+function truncateEvidence(value: string, maximum = 150) {
+  return value.length <= maximum ? value : `${value.slice(0, maximum - 1).trim()}…`
+}
+
+function createSourceGroundedQuestions(
+  sourceText: string,
+  profile: ClassProfile,
+  standards: string[],
+): Question[] {
+  const topic = profile.topic.trim() || 'the lesson topic'
+  const sentences = cleanSourceSentences(sourceText)
+  const evidence = (index: number) => truncateEvidence(
+    sentences[index % Math.max(1, sentences.length)] || sourceText.trim() || topic,
+  )
+  const tags = (index: number) => standards.length
+    ? [standards[index % standards.length]]
+    : []
+
+  return [
+    {
+      id: 'q-source-idea',
+      type: 'multiple-choice',
+      prompt: `Which statement is directly supported by the source about ${topic}?`,
+      options: [
+        evidence(0),
+        `The source says ${topic} has no important details.`,
+        `Every example of ${topic} has exactly the same meaning.`,
+        `The source does not discuss ${topic}.`,
+      ],
+      standardIds: tags(0),
+    },
+    {
+      id: 'q-explain-source',
+      type: 'short-answer',
+      prompt: `Explain this source idea in your own words: “${evidence(1)}”`,
+      standardIds: tags(1),
+    },
+    {
+      id: 'q-summary-detail',
+      type: 'multiple-choice',
+      prompt: `Which detail belongs in an accurate summary of ${topic}?`,
+      options: [
+        evidence(2),
+        `A detail unrelated to ${topic}.`,
+        `An opinion that is not supported by the source.`,
+        `A claim that contradicts the class material.`,
+      ],
+      standardIds: tags(2),
+    },
+    {
+      id: 'q-use-evidence',
+      type: 'short-answer',
+      prompt: `Use one detail from the source to explain an important idea about ${topic}.`,
+      standardIds: tags(3),
+    },
+    {
+      id: 'q-apply-learning',
+      type: 'extended-response',
+      prompt: `Create a new example that applies what the source teaches about ${topic}. Explain how your example connects to the class material.`,
+      standardIds: tags(4),
+    },
+    {
+      id: 'q-synthesize-source',
+      type: 'extended-response',
+      prompt: `What are the two most important ideas a student should remember about ${topic}? Support both ideas with evidence from the source.`,
+      standardIds: tags(5),
+    },
+  ]
+}
+
 export function createDraftWorksheet(
-  topic = 'Fractions & decimals',
+  profile: ClassProfile,
   source?: Pick<SourceMaterial, 'kind' | 'content' | 'extractedText' | 'topic'>,
+  standards: string[] = [],
 ): Worksheet {
   const analysis = source
     ? analyzeSourceMaterial(source)
@@ -297,11 +543,33 @@ export function createDraftWorksheet(
         focus: ['fractions & decimals'],
         tenthsNumerator: 3,
         decimals: [],
+        fractions: [],
       }
+  const sourceText = source
+    ? source.kind === 'text'
+      ? source.content
+      : source.extractedText?.trim() || ''
+    : ''
+  const isGradeFourMath = profile.grade === 4 && /math/i.test(profile.subject)
+  const useMathGenerator = isGradeFourMath && Boolean(
+    analysis.fractionComparison || analysis.fractions.length || analysis.decimals.length,
+  )
+  const questions = useMathGenerator
+    ? createDraftQuestions(analysis).map((question, index) => ({
+        ...question,
+        standardIds: standards.length
+          ? question.standardIds.filter((id) => standards.includes(id)).length
+            ? question.standardIds.filter((id) => standards.includes(id))
+            : [standards[index % standards.length]]
+          : [],
+      }))
+    : createSourceGroundedQuestions(sourceText, profile, standards)
   return {
-    title: 'Fractions as Decimals',
-    subtitle: `Grade 4 mathematics · ${topic} · Source focus: ${analysis.focus.join(', ')}`,
-    questions: createDraftQuestions(analysis),
+    title: analysis.fractionComparison
+      ? 'Comparing Fractions'
+      : `${profile.topic.trim() || 'Source-Based'} Practice`,
+    subtitle: `Grade ${profile.grade} ${profile.subject.trim()} · ${profile.topic.trim()} · Source-grounded`,
+    questions,
     updatedAt: new Date().toISOString(),
   }
 }
@@ -322,7 +590,7 @@ export function assertQuestionContent(question: Question, inputInstruction = '')
   const normalizedInstruction = inputInstruction.trim().toLowerCase()
   const invalidPrompt =
     !prompt ||
-    (normalizedInstruction.length > 0 && normalizedPrompt === normalizedInstruction) ||
+    (normalizedInstruction.length > 0 && normalizedPrompt.includes(normalizedInstruction)) ||
     instructionLeakPattern(prompt)
   const invalidOptions =
     question.type === 'multiple-choice' &&
@@ -390,9 +658,36 @@ export function generateReplacementQuestion(question: Question, instruction: str
     }
   }
 
-  throw new Error(
-    'I could not generate a replacement from that note. Name the target concept, such as decimals or fractions, and try again.',
-  )
+  const concept = reason
+    .replace(
+      /^(?:please\s+)?(?:swap|replace|change)(?:\s+(?:this|the)(?:\s+question)?)?\s+(?:for|with|into|to)\s+(?:a|an)?\s*(?:new\s+)?(?:question|item)?\s*(?:about|on|covering)?\s*/i,
+      '',
+    )
+    .replace(
+      /^(?:create|generate|make)\s+(?:a|an)?\s*(?:new\s+)?(?:question|item)?\s*(?:about|on|covering)?\s*/i,
+      '',
+    )
+    .trim()
+  if (!concept) {
+    throw new Error('Name the concept the replacement question should assess.')
+  }
+  if (question.type === 'multiple-choice') {
+    return {
+      ...question,
+      prompt: `Which statement best explains ${concept}?`,
+      options: [
+        `A clear explanation of ${concept} using the source material`,
+        `A statement about an unrelated topic`,
+        `An unsupported claim about ${concept}`,
+        `A detail that contradicts the source material`,
+      ],
+    }
+  }
+  return {
+    ...question,
+    prompt: `Use evidence from the class material to explain ${concept}.`,
+    options: undefined,
+  }
 }
 
 export function checkTimeEstimate(worksheet: Pick<Worksheet, 'questions'>): TimeCheck {
@@ -568,9 +863,11 @@ export function normalizeQuestionChanges(
       .map((option) => option.slice(0, 120))
   }
   if (Array.isArray(changes.standardIds)) {
-    normalized.standardIds = changes.standardIds.filter((id) =>
-      STANDARD_LIBRARY.some((standard) => standard.id === id),
-    )
+    normalized.standardIds = changes.standardIds
+      .filter((id): id is string => typeof id === 'string')
+      .map((id) => id.trim().slice(0, 80))
+      .filter(Boolean)
+      .slice(0, 8)
   }
   return normalized
 }

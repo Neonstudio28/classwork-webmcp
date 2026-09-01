@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:full": "concurrently -k -n api,web \"node --env-file-if-exists=.env.local server/index.mjs\" \"vite\"",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "test": "node --test server/*.test.mjs",
+    "preview": "vite preview",
+    "start": "npm run build && node --env-file-if-exists=.env.local server/index.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.37.0",
@@ -19,6 +22,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
+    "concurrently": "^10.0.5",
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.2"

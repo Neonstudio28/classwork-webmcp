@@ -23,7 +23,6 @@ import {
   GripVertical,
   ImagePlus,
   ListChecks,
-  LockKeyhole,
   LoaderCircle,
   MessageSquare,
   Minus,
@@ -40,7 +39,6 @@ import {
 import './App.css'
 import {
   QUESTION_TYPE_LABELS,
-  STANDARD_LIBRARY,
   analyzeSourceMaterial,
   evaluateConstraints,
   sourceGroundingLabel,
@@ -98,6 +96,13 @@ function relativeTime(iso: string) {
 }
 
 async function resizeImage(file: File) {
+  const supportedTypes = new Set(['image/png', 'image/jpeg', 'image/webp'])
+  if (!supportedTypes.has(file.type)) {
+    throw new Error('Upload a PNG, JPEG, or WebP image.')
+  }
+  if (file.size <= 0 || file.size > 10_000_000) {
+    throw new Error('Upload an image smaller than 10 MB.')
+  }
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(String(reader.result))
@@ -105,14 +110,19 @@ async function resizeImage(file: File) {
     reader.readAsDataURL(file)
   })
 
-  if (file.type === 'image/svg+xml') return dataUrl
-
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const preview = new Image()
     preview.onload = () => resolve(preview)
     preview.onerror = () => reject(new Error('Could not decode that image.'))
     preview.src = dataUrl
   })
+  if (
+    image.naturalWidth <= 0 ||
+    image.naturalHeight <= 0 ||
+    image.naturalWidth * image.naturalHeight > 40_000_000
+  ) {
+    throw new Error('That image has invalid or excessively large dimensions.')
+  }
   const maxDimension = 1280
   const scale = Math.min(1, maxDimension / Math.max(image.width, image.height))
   const canvas = document.createElement('canvas')
@@ -154,7 +164,7 @@ function Instrument({ label, icon, status, value, target, description, highlight
   )
 }
 
-function ConstraintPanel({ snapshot, hasDraft }: { snapshot: ConstraintSnapshot; hasDraft: boolean }) {
+function ConstraintPanel({ snapshot, hasDraft, grade }: { snapshot: ConstraintSnapshot; hasDraft: boolean; grade: number }) {
   const time = useAnimatedNumber(hasDraft ? snapshot.time.estimate : 0)
   const reading = useAnimatedNumber(hasDraft ? snapshot.reading.grade : 0)
   const coverage = useAnimatedNumber(hasDraft ? snapshot.coverage.hit.length : 0)
@@ -209,10 +219,10 @@ function ConstraintPanel({ snapshot, hasDraft }: { snapshot: ConstraintSnapshot;
           highlighted={highlighted.includes('reading')}
           value={hasDraft ? `Grade ${reading.toFixed(1)}` : '—'}
           target={`range ${snapshot.reading.range[0]}–${snapshot.reading.range[1]}`}
-          description={!hasDraft ? 'Waiting for a draft' : snapshot.reading.status === 'satisfied' ? 'Accessible for Grade 4' : snapshot.reading.grade > snapshot.reading.target ? 'Simplify sentence length or vocabulary' : 'Language may be too simple for the target'}
+          description={!hasDraft ? 'Waiting for a draft' : snapshot.reading.status === 'satisfied' ? `Accessible for Grade ${grade}` : snapshot.reading.grade > snapshot.reading.target ? 'Simplify sentence length or vocabulary' : 'Language may be too simple for the target'}
         >
           <div className="grade-scale" aria-hidden="true">
-            {[3, 4, 5].map((grade) => <span key={grade} className={Math.round(snapshot.reading.grade) === grade && hasDraft ? 'is-current' : ''}>{grade}</span>)}
+            {[Math.max(1, grade - 1), grade, Math.min(12, grade + 1)].map((scaleGrade) => <span key={scaleGrade} className={Math.round(snapshot.reading.grade) === scaleGrade && hasDraft ? 'is-current' : ''}>{scaleGrade}</span>)}
           </div>
         </Instrument>
 
@@ -222,7 +232,7 @@ function ConstraintPanel({ snapshot, hasDraft }: { snapshot: ConstraintSnapshot;
           status={status(snapshot.mix.status)}
           highlighted={highlighted.includes('mix')}
           value={hasDraft ? `${snapshot.mix.counts['multiple-choice']} · ${snapshot.mix.counts['short-answer']} · ${snapshot.mix.counts['extended-response']}` : '—'}
-          target="target 40 · 40 · 20"
+          target={`target ${Math.round(snapshot.mix.target['multiple-choice'] * 100)} · ${Math.round(snapshot.mix.target['short-answer'] * 100)} · ${Math.round(snapshot.mix.target['extended-response'] * 100)}`}
           description={!hasDraft ? 'Waiting for a draft' : snapshot.mix.status === 'satisfied' ? 'Balanced across three response modes' : 'Extended response is overrepresented'}
         >
           <div className="mix-bars" role="img" aria-label="Multiple choice, short answer, and extended response percentages">
@@ -238,7 +248,7 @@ function ConstraintPanel({ snapshot, hasDraft }: { snapshot: ConstraintSnapshot;
           highlighted={highlighted.includes('coverage')}
           value={hasDraft ? `${Math.round(coverage)} of ${snapshot.coverage.total}` : '—'}
           target="required standards"
-          description={!hasDraft ? 'Waiting for a draft' : snapshot.coverage.status === 'satisfied' ? 'Every selected standard is represented' : `Missing ${snapshot.coverage.missing.join(', ')}`}
+          description={!hasDraft ? 'Waiting for a draft' : snapshot.coverage.total === 0 ? 'Add at least one required standard' : snapshot.coverage.status === 'satisfied' ? 'Every selected standard is represented' : `Missing ${snapshot.coverage.missing.join(', ')}`}
         >
           <div className="coverage-track" aria-hidden="true">
             {snapshot.coverage.total > 0 && Array.from({ length: snapshot.coverage.total }).map((_, index) => <span key={index} className={hasDraft && index < snapshot.coverage.hit.length ? 'is-hit' : ''} />)}
@@ -269,11 +279,14 @@ interface QuestionCardProps {
   dragging: boolean
   onDragStart: (event: DragEvent<HTMLElement>, id: string) => void
   onDragEnd: () => void
+  onDragEnter: (event: DragEvent<HTMLElement>, index: number) => void
   onDropAt: (event: DragEvent<HTMLElement>, index: number) => void
+  dropTarget: boolean
+  standards: string[]
   pending?: boolean
 }
 
-function QuestionCard({ question, index, total, dragging, onDragStart, onDragEnd, onDropAt, pending = false }: QuestionCardProps) {
+function QuestionCard({ question, index, total, dragging, onDragStart, onDragEnd, onDragEnter, onDropAt, dropTarget, standards, pending = false }: QuestionCardProps) {
   const rewriteStarted = useRef(question.prompt)
   const moveByKeyboard = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!event.altKey) return
@@ -288,7 +301,7 @@ function QuestionCard({ question, index, total, dragging, onDragStart, onDragEnd
   }
 
   return (
-    <article className={`question-card ${dragging ? 'question-card--dragging' : ''} ${pending ? 'question-card--pending' : ''}`} aria-busy={pending} onDragOver={(event) => event.preventDefault()} onDrop={(event) => onDropAt(event, index)}>
+    <article className={`question-card ${dragging ? 'question-card--dragging' : ''} ${dropTarget ? 'question-card--drop-target' : ''} ${pending ? 'question-card--pending' : ''}`} aria-busy={pending} onDragEnter={(event) => onDragEnter(event, index)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => onDropAt(event, index)}>
       <div className="question-card__rail">
         <span className="question-number">{String(index + 1).padStart(2, '0')}</span>
         <button type="button" className="icon-button drag-handle" draggable onDragStart={(event) => onDragStart(event, question.id)} onDragEnd={onDragEnd} onKeyDown={moveByKeyboard} aria-label={`Move question ${index + 1}. Drag, or press Alt and an arrow key.`} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" title="Drag to reorder · Alt + arrow keys">
@@ -306,8 +319,9 @@ function QuestionCard({ question, index, total, dragging, onDragStart, onDragEnd
           </label>
           <label>
             <span className="sr-only">Question {index + 1} standard</span>
-            <select value={question.standardIds[0] ?? ''} disabled={pending} onChange={(event) => workspaceActions.editQuestion(question.id, { standardIds: [event.target.value] })}>
-              {STANDARD_LIBRARY.map((standard) => <option key={standard.id} value={standard.id}>{standard.id}</option>)}
+            <select value={question.standardIds[0] ?? ''} disabled={pending} onChange={(event) => workspaceActions.editQuestion(question.id, { standardIds: event.target.value ? [event.target.value] : [] })}>
+              <option value="">Unaligned</option>
+              {standards.map((standard) => <option key={standard} value={standard}>{standard}</option>)}
             </select>
           </label>
         </div>
@@ -346,17 +360,18 @@ function QuestionCard({ question, index, total, dragging, onDragStart, onDragEnd
 function App() {
   const state = useSyncExternalStore(workspaceStore.subscribe, workspaceStore.getSnapshot, workspaceStore.getSnapshot)
   const [sourceText, setSourceText] = useState('')
-  const [topic, setTopic] = useState('Fractions & decimals')
   const [instruction, setInstruction] = useState('')
   const [draggedId, setDraggedId] = useState<string | null>(null)
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null)
   const [uploadError, setUploadError] = useState('')
   const [agentError, setAgentError] = useState('')
   const [pendingOperation, setPendingOperation] = useState<{ kind: 'draft' | 'agent' | 'swap'; questionId?: string } | null>(null)
+  const [announcement, setAnnouncement] = useState('')
   const [toolStatus, setToolStatus] = useState({ state: 'checking', count: 0, message: 'Checking WebMCP support…' })
   const fileInput = useRef<HTMLInputElement>(null)
   const snapshot = useMemo(() => evaluateConstraints(state.worksheet, state.constraints), [state.constraints, state.worksheet])
 
-  const announcement = useMemo(() => {
+  const nextAnnouncement = useMemo(() => {
     if (!state.hasDraft) return ''
     const needsAttention = [
       snapshot.time.status === 'needs-attention' ? 'completion time' : '',
@@ -364,19 +379,38 @@ function App() {
       snapshot.mix.status === 'needs-attention' ? 'question balance' : '',
       snapshot.coverage.status === 'needs-attention' ? 'standards coverage' : '',
     ].filter(Boolean)
+    const metrics = `Completion time ${snapshot.time.estimate.toFixed(1)} minutes. Reading level grade ${snapshot.reading.grade.toFixed(1)}. Question balance ${snapshot.mix.counts['multiple-choice']} multiple choice, ${snapshot.mix.counts['short-answer']} short answer, ${snapshot.mix.counts['extended-response']} extended response. Standards ${snapshot.coverage.hit.length} of ${snapshot.coverage.total}.`
     return needsAttention.length
-      ? `Constraint checks updated. ${snapshot.satisfiedCount} of 4 satisfied. Needs attention: ${needsAttention.join(', ')}.`
-      : 'Constraint checks updated. All four constraints are satisfied. This worksheet is ready for class.'
+      ? `Constraint checks updated. ${snapshot.satisfiedCount} of 4 satisfied. ${metrics} Needs attention: ${needsAttention.join(', ')}.`
+      : `Constraint checks updated. All four constraints are satisfied. ${metrics} This worksheet is ready for class.`
   }, [snapshot, state.hasDraft])
 
   const visibleAgentError = agentError || state.lastError
 
   useEffect(() => registerClassworkTools(setToolStatus), [])
 
+  useEffect(() => {
+    void workspaceActions.hydrate()
+  }, [])
+
+  useEffect(() => {
+    const timeout = window.setTimeout(
+      () => setAnnouncement(nextAnnouncement),
+      nextAnnouncement ? 360 : 0,
+    )
+    return () => window.clearTimeout(timeout)
+  }, [nextAnnouncement])
+
   const addTypedSource = () => {
     try {
       setUploadError('')
-      workspaceActions.addSourceMaterial(sourceText, 4, topic, 'Pasted lesson notes')
+      workspaceActions.addSourceMaterial(
+        sourceText,
+        state.profile.grade,
+        state.profile.subject,
+        state.profile.topic,
+        'Pasted lesson notes',
+      )
       setSourceText('')
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Could not add source material.')
@@ -385,11 +419,17 @@ function App() {
 
   const uploadSource = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (!file) return
+    if (!file || pendingOperation) return
     try {
       setUploadError('')
       const dataUrl = await resizeImage(file)
-      workspaceActions.addSourceMaterial(dataUrl, 4, topic, file.name)
+      workspaceActions.addSourceMaterial(
+        dataUrl,
+        state.profile.grade,
+        state.profile.subject,
+        state.profile.topic,
+        file.name,
+      )
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Could not add that image.')
     } finally {
@@ -401,9 +441,9 @@ function App() {
     if (pendingOperation) return
     setUploadError('')
     setPendingOperation({ kind: 'draft' })
-    window.setTimeout(() => {
+    window.setTimeout(async () => {
       try {
-        workspaceActions.generateDraft(undefined, 'agent')
+        await workspaceActions.generateDraft(undefined, 'agent')
       } catch (error) {
         setUploadError(error instanceof Error ? error.message : 'Could not generate the draft.')
       } finally {
@@ -421,9 +461,9 @@ function App() {
       : undefined
     setAgentError('')
     setPendingOperation(target ? { kind: 'swap', questionId: target.id } : { kind: 'agent' })
-    window.setTimeout(() => {
+    window.setTimeout(async () => {
       try {
-        runAgentInstruction(cleaned)
+        await runAgentInstruction(cleaned)
         setInstruction('')
       } catch (error) {
         setAgentError(error instanceof Error ? error.message : 'The instruction could not be completed.')
@@ -435,8 +475,23 @@ function App() {
 
   const startDrag = (event: DragEvent<HTMLElement>, id: string) => {
     setDraggedId(id)
+    setDropTargetIndex(null)
     event.dataTransfer.effectAllowed = 'move'
     event.dataTransfer.setData('text/plain', id)
+    const card = event.currentTarget.closest<HTMLElement>('.question-card')
+    if (card) {
+      const bounds = card.getBoundingClientRect()
+      event.dataTransfer.setDragImage(card, Math.min(48, bounds.width / 2), 24)
+    }
+  }
+
+  const enterDropTarget = (event: DragEvent<HTMLElement>, index: number) => {
+    event.preventDefault()
+    if (!draggedId) return
+    const draggedIndex = state.worksheet.questions.findIndex(
+      (question) => question.id === draggedId,
+    )
+    setDropTargetIndex(draggedIndex === index ? null : index)
   }
 
   const dropAt = (event: DragEvent<HTMLElement>, index: number) => {
@@ -444,6 +499,7 @@ function App() {
     const id = event.dataTransfer.getData('text/plain') || draggedId
     if (id) workspaceActions.moveQuestion(id, index)
     setDraggedId(null)
+    setDropTargetIndex(null)
   }
 
   const dropToDelete = (event: DragEvent<HTMLDivElement>) => {
@@ -451,12 +507,42 @@ function App() {
     const id = event.dataTransfer.getData('text/plain') || draggedId
     if (id) workspaceActions.deleteQuestion(id)
     setDraggedId(null)
+    setDropTargetIndex(null)
   }
 
-  const selectedStandards = new Set(state.constraints.standards)
   const sourceGrounding = state.source
     ? sourceGroundingLabel(analyzeSourceMaterial(state.source))
     : ''
+  const sourceReady = Boolean(
+    state.source &&
+    state.profile.subject.trim() &&
+    state.profile.topic.trim() &&
+    state.source.content,
+  )
+
+  const updateStandards = (value: string) => {
+    const standards = Array.from(new Set(
+      value
+        .split(',')
+        .map((standard) => standard.trim())
+        .filter(Boolean),
+    )).slice(0, 12)
+    workspaceActions.setConstraints({ standards })
+  }
+
+  const updateQuestionMix = (type: QuestionType, rawPercent: number) => {
+    const selected = Math.max(0, Math.min(100, rawPercent)) / 100
+    const otherTypes = QUESTION_TYPES.filter((candidate) => candidate !== type)
+    const otherTotal = otherTypes.reduce((sum, candidate) => sum + state.constraints.questionMix[candidate], 0)
+    const remainder = 1 - selected
+    const next = { ...state.constraints.questionMix, [type]: selected }
+    otherTypes.forEach((candidate) => {
+      next[candidate] = otherTotal > 0
+        ? remainder * (state.constraints.questionMix[candidate] / otherTotal)
+        : remainder / otherTypes.length
+    })
+    workspaceActions.setConstraints({ questionMix: next })
+  }
 
   return (
     <>
@@ -465,10 +551,10 @@ function App() {
         <header className="topbar glass-base">
           <div className="brand-lockup">
             <span className="brand-mark" aria-hidden="true"><FileText size={17} /></span>
-            <div><strong>Classwork</strong><span>Grade 4 mathematics workspace</span></div>
+            <div><strong>Classwork</strong><span>{state.profile.subject.trim() ? `Grade ${state.profile.grade} ${state.profile.subject} workspace` : 'Configurable worksheet workspace'}</span></div>
           </div>
           <div className="topbar__actions">
-            <span className="save-state"><Save size={14} /> Saved locally</span>
+            <span className="save-state"><Save size={14} /> Autosaved workspace</span>
             <span className={`webmcp-state webmcp-state--${toolStatus.state}`} title={toolStatus.message}>
               <i aria-hidden="true" />
               {toolStatus.state === 'ready' ? `${toolStatus.count} tools connected` : toolStatus.state === 'unsupported' ? 'WebMCP browser required' : toolStatus.message}
@@ -490,28 +576,55 @@ function App() {
                   {state.source.kind === 'image' ? <img src={state.source.content} alt={`Uploaded source: ${state.source.name}`} /> : (
                     <div className="source-note-preview"><FileText size={18} /><p>{state.source.content}</p></div>
                   )}
-                  <div className="source-preview__meta"><strong>{state.source.name}</strong><span>{state.source.topic} · Grade {state.source.grade}</span><span>{sourceGrounding}</span></div>
-                  <button type="button" className="text-button" onClick={() => fileInput.current?.click()}>Replace source</button>
+                  <div className="source-preview__meta"><strong>{state.source.name}</strong><span>Grade {state.source.grade}{state.source.subject ? ` ${state.source.subject}` : ''} · {state.source.topic || 'Topic not set'}</span><span>{sourceGrounding}</span></div>
+                  {state.source.kind === 'image' && (
+                    <label className="field source-transcript-field">
+                      <span>Gemini vision extraction <small>optional review</small></span>
+                      <textarea
+                        value={state.source.extractedText ?? ''}
+                        onChange={(event) => {
+                          setUploadError('')
+                          workspaceActions.updateSourceTranscript(event.target.value)
+                        }}
+                        rows={5}
+                        placeholder="Generated after Gemini reads the image; optionally add teacher notes here…"
+                      />
+                    </label>
+                  )}
+                  <div className="source-preview__actions">
+                    <button type="button" className="text-button" onClick={() => fileInput.current?.click()} disabled={Boolean(pendingOperation)}>Replace source</button>
+                    <button type="button" className="text-button text-button--danger" onClick={() => {
+                      workspaceActions.removeSource()
+                      setSourceText('')
+                      setInstruction('')
+                      setUploadError('')
+                      setAgentError('')
+                    }} disabled={Boolean(pendingOperation)}>Remove source</button>
+                  </div>
                 </div>
               ) : (
                 <div className="source-empty">
-                  <button type="button" className="upload-zone" onClick={() => fileInput.current?.click()}>
-                    <span><ImagePlus size={19} /></span><strong>Choose a classroom photo</strong><small>Whiteboard, textbook, or old worksheet</small>
+                  <button type="button" className="upload-zone" onClick={() => fileInput.current?.click()} disabled={Boolean(pendingOperation)}>
+                    <span><ImagePlus size={19} /></span>
+                    <strong>Choose a classroom photo</strong>
+                    <small>Whiteboard, textbook, or old worksheet</small>
                   </button>
                   <div className="or-divider"><span>or paste notes</span></div>
                   <label className="field"><span>Source text</span><textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} rows={5} placeholder="Paste the concepts, examples, or directions students have already seen…" /></label>
                   <button type="button" className="button button--secondary button--full" onClick={addTypedSource} disabled={!sourceText.trim()}><Plus size={15} /> Add notes</button>
-                  <button type="button" className="text-button text-button--center" onClick={() => workspaceActions.loadDemoSource()}>Use demo worksheet image</button>
                 </div>
               )}
-              <input ref={fileInput} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/svg+xml" onChange={uploadSource} aria-label="Upload source image" />
+              <input ref={fileInput} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={uploadSource} aria-label="Upload source image" disabled={Boolean(pendingOperation)} />
               {uploadError && <p className="form-error" role="alert">{uploadError}</p>}
             </section>
 
             <section className="settings-panel glass-raised">
               <div className="panel-heading"><div><p className="eyebrow">02 · Parameters</p><h2>Class fit</h2></div></div>
-              <div className="fixed-scope"><div><span>Grade & subject</span><strong>Grade 4 · Mathematics</strong></div><LockKeyhole size={15} aria-label="Demo scope locked" /></div>
-              <label className="field"><span>Topic</span><input value={topic} onChange={(event) => setTopic(event.target.value)} /></label>
+              <div className="profile-fields">
+                <label className="field"><span>Grade</span><select value={state.profile.grade} onChange={(event) => workspaceActions.updateProfile({ grade: Number(event.target.value) })}>{Array.from({ length: 12 }, (_, index) => index + 1).map((grade) => <option key={grade} value={grade}>Grade {grade}</option>)}</select></label>
+                <label className="field"><span>Subject</span><input value={state.profile.subject} onChange={(event) => workspaceActions.updateProfile({ subject: event.target.value })} placeholder="Science, English…" /></label>
+              </div>
+              <label className="field"><span>Topic</span><input value={state.profile.topic} onChange={(event) => workspaceActions.updateProfile({ topic: event.target.value })} placeholder="Enter the lesson topic" /></label>
               <div className="stepper-field">
                 <div><span>Completion time</span><small>Independent practice</small></div>
                 <div className="stepper">
@@ -520,22 +633,10 @@ function App() {
                   <button type="button" onClick={() => workspaceActions.setConstraints({ timeLimit: Math.min(45, state.constraints.timeLimit + 5) })} aria-label="Increase time limit"><Plus size={14} /></button>
                 </div>
               </div>
-              <div className="reading-target"><span>Reading target</span><strong>Grade 4 <small>± 0.7</small></strong></div>
-              <fieldset className="standards-fieldset">
-                <legend>Required standards</legend>
-                {STANDARD_LIBRARY.map((standard) => (
-                  <label key={standard.id}>
-                    <input type="checkbox" checked={selectedStandards.has(standard.id)} onChange={(event) => {
-                      const standards = event.target.checked ? [...state.constraints.standards, standard.id] : state.constraints.standards.filter((id) => id !== standard.id)
-                      if (standards.length) workspaceActions.setConstraints({ standards })
-                    }} />
-                    <span className="custom-check" aria-hidden="true"><Check size={12} /></span>
-                    <span><strong>{standard.id}</strong><small>{standard.short}</small></span>
-                  </label>
-                ))}
-              </fieldset>
-              <div className="mix-target"><span>Question mix</span><div><b>40</b><b>40</b><b>20</b></div><small><span>MC</span><span>Short</span><span>Extended</span></small></div>
-              <button type="button" className="button button--primary button--full" onClick={generateDraft} disabled={!state.source || Boolean(pendingOperation)}><WandSparkles size={16} /> {pendingOperation?.kind === 'draft' ? 'Generating draft…' : state.hasDraft ? 'Regenerate draft' : 'Generate draft'}</button>
+              <div className="reading-target"><span>Reading target</span><div className="inline-stepper"><button type="button" onClick={() => workspaceActions.setConstraints({ readingLevel: Math.max(1, state.constraints.readingLevel - 0.5) })} aria-label="Decrease reading target"><Minus size={13} /></button><strong>Grade {state.constraints.readingLevel}<small> ± 0.7</small></strong><button type="button" onClick={() => workspaceActions.setConstraints({ readingLevel: Math.min(12, state.constraints.readingLevel + 0.5) })} aria-label="Increase reading target"><Plus size={13} /></button></div></div>
+              <label className="field standards-input"><span>Required standards</span><input aria-label="Required standards" value={state.constraints.standards.join(', ')} onChange={(event) => updateStandards(event.target.value)} placeholder="e.g. NGSS 4-ESS1-1, CCSS RI.4.1" /><small>Comma-separated; use your district or curriculum IDs.</small></label>
+              <div className="mix-target mix-target--editable"><span>Question mix</span><div>{QUESTION_TYPES.map((type) => <label key={type}><input type="number" min="0" max="100" value={Math.round(state.constraints.questionMix[type] * 100)} onChange={(event) => updateQuestionMix(type, Number(event.target.value))} aria-label={`${QUESTION_TYPE_LABELS[type]} target percentage`} /><small>{type === 'multiple-choice' ? 'MC' : type === 'short-answer' ? 'Short' : 'Extended'}</small></label>)}</div></div>
+              <button type="button" className="button button--primary button--full" onClick={generateDraft} disabled={!sourceReady || Boolean(pendingOperation)}><WandSparkles size={16} /> {pendingOperation?.kind === 'draft' ? 'Gemini is reading the source…' : state.hasDraft ? 'Regenerate draft' : 'Generate draft'}</button>
             </section>
           </aside>
 
@@ -554,7 +655,7 @@ function App() {
                 </div>
                 <div className="question-list">
                   {state.worksheet.questions.map((question, index) => (
-                    <QuestionCard key={question.id} question={question} index={index} total={state.worksheet.questions.length} dragging={draggedId === question.id} pending={pendingOperation?.kind === 'draft' || (pendingOperation?.kind === 'swap' && pendingOperation.questionId === question.id)} onDragStart={startDrag} onDragEnd={() => setDraggedId(null)} onDropAt={dropAt} />
+                    <QuestionCard key={question.id} question={question} index={index} total={state.worksheet.questions.length} dragging={draggedId === question.id} dropTarget={dropTargetIndex === index && draggedId !== question.id} standards={state.constraints.standards} pending={pendingOperation?.kind === 'draft' || (pendingOperation?.kind === 'swap' && pendingOperation.questionId === question.id)} onDragStart={startDrag} onDragEnter={enterDropTarget} onDragEnd={() => { setDraggedId(null); setDropTargetIndex(null) }} onDropAt={dropAt} />
                   ))}
                 </div>
                 <div className={`delete-dropzone ${draggedId ? 'delete-dropzone--active' : ''}`} onDragOver={(event) => event.preventDefault()} onDrop={dropToDelete} aria-hidden={!draggedId}>
@@ -573,19 +674,25 @@ function App() {
               <div className="agent-console__heading"><span className="agent-mark" aria-hidden="true"><Bot size={17} /></span><div><strong>Revision agent</strong><span>Uses the same tools and board state</span></div></div>
               <form onSubmit={submitInstruction}>
                 <label className="sr-only" htmlFor="agent-instruction">Tell the agent what to change</label>
-                <input id="agent-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="Swap the fractions question for something on decimals" />
+                <input id="agent-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder={`Ask the agent to revise ${state.profile.topic || 'this worksheet'}`} />
                 <button type="submit" className="send-button" disabled={!instruction.trim() || !state.hasDraft || Boolean(pendingOperation)} aria-label="Send instruction">{pendingOperation ? <LoaderCircle size={16} className="pending-spinner" /> : <Send size={16} />}</button>
               </form>
-              {visibleAgentError ? <p className="agent-response agent-response--error" role="alert"><CircleAlert size={14} /> {visibleAgentError}</p> : state.lastAgentMessage ? <p className="agent-response"><Check size={14} /> {state.lastAgentMessage}</p> : <button type="button" className="agent-suggestion" onClick={() => setInstruction('Swap the fractions question for something on decimals')}>Try the demo instruction</button>}
+              {visibleAgentError ? <p className="agent-response agent-response--error" role="alert"><CircleAlert size={14} /> {visibleAgentError}</p> : state.lastAgentMessage ? <p className="agent-response"><Check size={14} /> {state.lastAgentMessage}</p> : <button type="button" className="agent-suggestion" onClick={() => setInstruction(`Make the ${state.profile.topic || 'worksheet'} practice shorter`)}>Try a revision</button>}
             </section>
           </section>
 
           <aside className="constraint-column" aria-label="Live worksheet checks and activity">
-            <ConstraintPanel snapshot={snapshot} hasDraft={state.hasDraft} />
+            <ConstraintPanel snapshot={snapshot} hasDraft={state.hasDraft} grade={state.profile.grade} />
             <section className="activity-panel glass-raised">
               <div className="panel-heading activity-heading">
                 <div><p className="eyebrow">Shared history</p><h2>Activity</h2></div>
-                {state.activity.length > 0 && <button type="button" className="icon-button" onClick={() => workspaceActions.reset()} aria-label="Reset demo workspace" title="Reset demo"><RotateCcw size={15} /></button>}
+                {state.activity.length > 0 && <button type="button" className="icon-button" onClick={() => {
+                  workspaceActions.removeSource()
+                  setSourceText('')
+                  setInstruction('')
+                  setUploadError('')
+                  setAgentError('')
+                }} aria-label="Clear workspace" title="Clear workspace"><RotateCcw size={15} /></button>}
               </div>
               {state.activity.length ? (
                 <ol className="activity-list">
