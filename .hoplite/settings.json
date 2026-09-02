@@ -2,7 +2,7 @@
   "version": 1,
   "ports": {"preview": 5173, "additional": {}},
   "scripts": {
-    "setup": {"enabled": true, "command": "npm install --no-audit --no-fund"},
+    "setup": {"enabled": true, "command": "apt-get update -q && apt-get install -y git-lfs && git lfs install --skip-smudge && npm install --no-audit --no-fund"},
     "run": {"enabled": true, "command": "npm run dev:full"},
     "archive": {"enabled": true, "command": null},
     "check": {"enabled": true, "command": null}
