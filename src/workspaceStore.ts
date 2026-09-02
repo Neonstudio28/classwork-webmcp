@@ -374,14 +374,9 @@ export const workspaceActions = {
       source: current.source
         ? { ...current.source, grade, subject, topic }
         : null,
-      constraints: {
-        ...current.constraints,
-        readingLevel: grade,
-      },
-      worksheet: { ...EMPTY_WORKSHEET, questions: [] },
-      hasDraft: false,
-      lastAgentMessage: '',
-      lastError: '',
+      constraints: changes.grade === undefined
+        ? current.constraints
+        : { ...current.constraints, readingLevel: grade },
     }))
     return state.profile
   },
@@ -428,13 +423,22 @@ export const workspaceActions = {
   },
 
   removeSource() {
-    const next = initialState(new Date().toISOString())
-    cancelScheduledDatabaseSave()
-    state = next
-    stateRevision += 1
-    safeWriteLocalState(next)
-    queueDatabaseOperation(deleteWorkspaceFromDatabase)
-    listeners.forEach((listener) => listener())
+    commit((current) => ({
+      ...current,
+      source: null,
+      worksheet: { ...EMPTY_WORKSHEET, questions: [] },
+      hasDraft: false,
+      lastAgentMessage: '',
+      lastError: '',
+      activity: withActivity(
+        current,
+        activity(
+          'teacher',
+          'Removed source material',
+          `${current.source?.name ?? 'Class material'} · class fit kept`,
+        ),
+      ),
+    }))
   },
 
   updateSourceTranscript(transcript: string) {
