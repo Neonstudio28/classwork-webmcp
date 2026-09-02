@@ -17,14 +17,14 @@ import {
   type SourceMaterial,
   type WorkspaceState,
   type WorksheetConstraints,
-} from './worksheet'
+} from './worksheet.ts'
 import {
   deleteWorkspaceFromDatabase,
   generateReplacementFromModel,
   generateWorksheetFromModel,
   loadWorkspaceFromDatabase,
   saveWorkspaceToDatabase,
-} from './workspaceApi'
+} from './workspaceApi.ts'
 
 const STORAGE_KEY = 'classwork.workspace.v2'
 const SUPPORTED_INLINE_IMAGE = /^data:image\/(?:png|jpe?g|webp);base64,[A-Za-z0-9+/=\s]+$/i
