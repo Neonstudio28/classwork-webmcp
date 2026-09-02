@@ -9,12 +9,12 @@ import {
   type Question,
   type Worksheet,
   type WorksheetConstraints,
-} from './worksheet'
+} from './worksheet.ts'
 import {
   currentConstraintSnapshot,
   workspaceActions,
   workspaceStore,
-} from './workspaceStore'
+} from './workspaceStore.ts'
 
 type JsonSchema = Record<string, unknown>
 
