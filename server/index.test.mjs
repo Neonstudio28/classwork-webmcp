@@ -22,3 +22,4 @@ test('configured deployment host remains reachable without browser origin metada
 test('unknown non-API routes are not mistaken for API JSON responses', async () => { const response = await fetch(`${baseUrl}/not-an-api-route`); assert.notEqual(response.status, 404) })
 test('health response uses a strict referrer policy', async () => { const response = await fetch(`${baseUrl}/api/health`); assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin') })
 test('health response disables browser camera access', async () => { const response = await fetch(`${baseUrl}/api/health`); assert.equal(response.headers.get('permissions-policy'), 'camera=(), microphone=(), geolocation=()') })
+test('health response disables shared caching', async () => { const response = await fetch(`${baseUrl}/api/health`); assert.equal(response.headers.get('cache-control'), 'no-store') })
