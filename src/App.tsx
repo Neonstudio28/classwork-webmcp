@@ -687,7 +687,7 @@ function App() {
               <div className="panel-heading activity-heading">
                 <div><p className="eyebrow">Shared history</p><h2>Activity</h2></div>
                 {state.activity.length > 0 && <button type="button" className="icon-button" onClick={() => {
-                  workspaceActions.removeSource()
+                  workspaceActions.reset()
                   setSourceText('')
                   setInstruction('')
                   setUploadError('')
