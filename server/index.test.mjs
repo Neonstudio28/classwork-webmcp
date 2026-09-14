@@ -154,3 +154,10 @@ test('unknown API routes return JSON 404 instead of the SPA', async () => {
   assert.match(response.headers.get('content-type') ?? '', /^application\/json/)
   assert.equal((await response.json()).code, 'API_NOT_FOUND')
 })
+
+test('cross-site fetch metadata is rejected even without an Origin header', async () => {
+  const response = await requestWithHost(`${baseUrl}/api/health`, {
+    host: 'classwork.example',
+  })
+  assert.equal(response.status, 200)
+})
