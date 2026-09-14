@@ -89,10 +89,7 @@ test('health endpoint is local and returns security headers', async () => {
 test('hostile browser origins are rejected before body handling', async () => {
   const response = await fetch(`${baseUrl}/api/generate`, {
     method: 'POST',
-    headers: {
-      origin: 'https://evil.example',
-      'content-type': 'text/plain',
-    },
+    headers: { origin: 'https://evil.example', 'content-type': 'text/plain' },
     body: '{}',
   })
   assert.equal(response.status, 403)
@@ -100,48 +97,25 @@ test('hostile browser origins are rejected before body handling', async () => {
 })
 
 test('configured deployment host accepts its matching browser origin', async () => {
-  const response = await requestWithHost(`${baseUrl}/api/health`, {
-    host: 'classwork.example',
-    origin: 'https://classwork.example',
-  })
+  const response = await requestWithHost(`${baseUrl}/api/health`, { host: 'classwork.example', origin: 'https://classwork.example' })
   assert.equal(response.status, 200)
   assert.equal(response.payload.ok, true)
 })
 
 test('configured deployment host rejects a different browser origin', async () => {
-  const response = await requestWithHost(`${baseUrl}/api/generate`, {
-    method: 'POST',
-    host: 'classwork.example',
-    origin: 'https://evil.example',
-    contentType: 'application/json',
-    body: '{}',
-  })
+  const response = await requestWithHost(`${baseUrl}/api/generate`, { method: 'POST', host: 'classwork.example', origin: 'https://evil.example', contentType: 'application/json', body: '{}' })
   assert.equal(response.status, 403)
   assert.equal(response.payload.code, 'CROSS_ORIGIN_REQUEST')
 })
 
 test('API mutations require JSON', async () => {
-  const response = await fetch(`${baseUrl}/api/generate`, {
-    method: 'POST',
-    headers: {
-      origin: baseUrl,
-      'content-type': 'text/plain',
-    },
-    body: '{}',
-  })
+  const response = await fetch(`${baseUrl}/api/generate`, { method: 'POST', headers: { origin: baseUrl, 'content-type': 'text/plain' }, body: '{}' })
   assert.equal(response.status, 415)
   assert.equal((await response.json()).code, 'JSON_REQUIRED')
 })
 
 test('malformed JSON is a generic client error', async () => {
-  const response = await fetch(`${baseUrl}/api/generate`, {
-    method: 'POST',
-    headers: {
-      origin: baseUrl,
-      'content-type': 'application/json',
-    },
-    body: '{broken',
-  })
+  const response = await fetch(`${baseUrl}/api/generate`, { method: 'POST', headers: { origin: baseUrl, 'content-type': 'application/json' }, body: '{broken' })
   assert.equal(response.status, 400)
   const payload = await response.json()
   assert.equal(payload.code, 'INVALID_JSON')
@@ -155,9 +129,12 @@ test('unknown API routes return JSON 404 instead of the SPA', async () => {
   assert.equal((await response.json()).code, 'API_NOT_FOUND')
 })
 
-test('cross-site fetch metadata is rejected even without an Origin header', async () => {
-  const response = await requestWithHost(`${baseUrl}/api/health`, {
-    host: 'classwork.example',
-  })
+test('configured deployment host remains reachable without browser origin metadata', async () => {
+  const response = await requestWithHost(`${baseUrl}/api/health`, { host: 'classwork.example' })
   assert.equal(response.status, 200)
+})
+
+test('unknown non-API routes are not mistaken for API JSON responses', async () => {
+  const response = await fetch(`${baseUrl}/not-an-api-route`)
+  assert.notEqual(response.status, 404)
 })
