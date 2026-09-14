@@ -576,7 +576,7 @@ export function createDraftWorksheet(
 
 function instructionLeakPattern(text: string) {
   return /responds?\s+to\s+this\s+teacher\s+(note|instruction)|this\s+teacher\s+(note|instruction)\s*:/i.test(text) ||
-    /^\s*(create|generate|make)\b.*\bquestion\b/i.test(text) ||
+    /^\s*(create|generate|make)\b.*\bquestions?\b/i.test(text) ||
     /^\s*(swap|replace|change)\b/i.test(text)
 }
 

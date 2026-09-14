@@ -8,7 +8,7 @@
     "dev:full": "concurrently -k -n api,web \"node --env-file-if-exists=.env.local server/index.mjs\" \"vite\"",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --test server/*.test.mjs",
+    "test": "node --test server/*.test.mjs src/*.test.ts",
     "preview": "vite preview",
     "start": "npm run build && node --env-file-if-exists=.env.local server/index.mjs"
   },
